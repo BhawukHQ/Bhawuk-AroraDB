@@ -1,0 +1,17 @@
+# AroraDB binaries
+aroradb
+aroradb.exe
+aroradb.test
+
+# Local data files
+data/
+*.data.*
+*.compact
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# VS Code / IDE settings
+.vscode/
+.idea/
