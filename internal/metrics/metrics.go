@@ -86,7 +86,7 @@ func (t *Tracker) GetSystemStats() SysStats {
 		TotalQueries:   atomic.LoadUint64(&t.queries),
 		ReadRate:       atomic.LoadUint64(&t.readRate),
 		WriteRate:      atomic.LoadUint64(&t.writeRate),
-		AllocatedMemMB: float64(m.Alloc)-float64(m.Sys)/1024/1024, // simplified alloc
+		AllocatedMemMB: float64(m.Alloc) / 1024 / 1024,
 		NumGoroutines:  runtime.NumGoroutine(),
 	}
 }
