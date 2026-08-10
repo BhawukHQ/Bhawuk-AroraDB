@@ -41,6 +41,7 @@ func NewServer(cfg *config.Config, db engine.StorageEngine) *Server {
 
 // Start boots up the HTTP API server.
 func (s *Server) Start() error {
+	InitUserDatabase(s.db)
 	mux := http.NewServeMux()
 
 	// Register API Routes
@@ -74,6 +75,11 @@ func (s *Server) Start() error {
 	mux.HandleFunc("POST /api/auth/login", handleLogin)
 	mux.HandleFunc("POST /api/auth/logout", handleLogout)
 	mux.HandleFunc("GET /api/admin/audit", handleGetAuditLogs)
+	
+	// User Onboarding Management API
+	mux.HandleFunc("GET /api/admin/users", handleListUsers)
+	mux.HandleFunc("POST /api/admin/users", handleCreateUser)
+	mux.HandleFunc("DELETE /api/admin/users/{username}", handleDeleteUser)
 
 	// Serve Static Files from embedded web UI
 	subFS, err := fs.Sub(webAssets, "web")
