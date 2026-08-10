@@ -4,13 +4,46 @@
   --font-sans: 'Outfit', sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
 
-  /* Color Palette */
-  --bg-dark: #07080c;
-  --bg-surface: rgba(18, 22, 35, 0.65);
-  --bg-card: rgba(28, 33, 53, 0.5);
-  --border-glow: rgba(255, 255, 255, 0.05);
-  --border-focus: rgba(0, 245, 212, 0.4);
+  /* Light theme (default) – modern white with gold accents */
+  --bg-dark: #f8f9fc;
+  --bg-surface: #f0f1f5;
+  --bg-card: #ffffff;
+  --bg-main: #f8f9fc;
+  --border-glow: rgba(0, 0, 0, 0.08);
+  --border-focus: rgba(207, 168, 60, 0.5);
 
+  --color-gold: #cfa83c;
+  --color-gold-hover: #b89c33;
+  --color-cyan: #0ea5e9;
+  --color-cyan-glow: rgba(14, 165, 233, 0.12);
+  --color-purple: #8b5cf6;
+  --color-purple-dark: #6d28d9;
+  --color-purple-glow: rgba(139, 92, 246, 0.12);
+  --color-blue: #3b82f6;
+  --color-green: #22c55e;
+  --color-red: #ef4444;
+
+  --text-primary: #1a1a2e;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+
+  --sidebar-width: 250px;
+  --header-height: 70px;
+  --transition-speed: 0.2s;
+  --blur-amount: 16px;
+}
+
+/* Dark theme overrides */
+.dark-theme {
+  --bg-dark: #0f1117;
+  --bg-surface: rgba(18, 22, 35, 0.65);
+  --bg-card: #1a1d2e;
+  --bg-main: #0f1117;
+  --border-glow: rgba(255, 255, 255, 0.08);
+  --border-focus: rgba(230, 192, 112, 0.5);
+
+  --color-gold: #e6c070;
+  --color-gold-hover: #d5b060;
   --color-cyan: #00f5d4;
   --color-cyan-glow: rgba(0, 245, 212, 0.12);
   --color-purple: #c77dff;
@@ -19,15 +52,10 @@
   --color-blue: #00bbf9;
   --color-green: #2ec4b6;
   --color-red: #ff3366;
-  
-  --text-primary: #f8f9fa;
+
+  --text-primary: #f0f0f0;
   --text-secondary: #9aa1bc;
   --text-muted: #5e6488;
-
-  --sidebar-width: 250px;
-  --header-height: 70px;
-  --transition-speed: 0.2s;
-  --blur-amount: 16px;
 }
 
 * {
@@ -42,6 +70,7 @@ body {
   color: var(--text-primary);
   min-height: 100vh;
   overflow: hidden;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 /* Custom Scrollbars */
@@ -51,19 +80,20 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.1);
+  background: rgba(0, 0, 0, 0.05);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--text-muted);
   border-radius: 4px;
+  opacity: 0.4;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+  opacity: 0.6;
 }
 
-/* Ambient glow backdrops */
+/* Ambient glow backdrops (subtle in light mode, visible in dark mode) */
 .glow-bg {
   position: absolute;
   width: 45vw;
@@ -72,6 +102,10 @@ body {
   filter: blur(160px);
   z-index: -1;
   pointer-events: none;
+  opacity: 0.04;
+}
+
+.dark-theme .glow-bg {
   opacity: 0.12;
 }
 

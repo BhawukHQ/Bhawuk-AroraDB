@@ -4,7 +4,7 @@ import {
   RefreshCw, Plus, Trash2, Edit, Search, 
   Folder, Play, ChevronRight, X, Clipboard, CheckCircle,
   Download, Upload, AlignLeft, Sliders, Server, Info,
-  Table, Cpu, Shield, ShieldCheck, Lock, LogOut, UserCheck, PlayCircle, Users
+  Table, Cpu, Shield, ShieldCheck, Lock, LogOut, UserCheck, PlayCircle
 } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, Area, Tooltip, XAxis } from 'recharts';
 import './App.css';
@@ -84,14 +84,8 @@ interface SQLResult {
 
 type UserRole = 'admin_proj' | 'admin_db' | 'user_db' | 'visitor';
 
-interface UserCredentials {
-  Username: string;
-  Password?: string;
-  Role: UserRole;
-}
-
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'overview' | 'kv' | 'docs' | 'sql' | 'logs' | 'api-docs' | 'users'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'kv' | 'docs' | 'sql' | 'logs' | 'api-docs'>('overview');
   
   // Auth Session state
   const [token, setToken] = useState(localStorage.getItem('arora_token') || '');
@@ -105,6 +99,19 @@ export default function App() {
 
   const [isConnected, setIsConnected] = useState(true);
   const [showPrivacyModal, setShowPrivacyModal] = useState<boolean>(false);
+
+  // Dark / Light theme toggle
+  const [isDark, setIsDark] = useState<boolean>(() => localStorage.getItem('arora_theme') === 'dark');
+
+  useEffect(() => {
+    if (isDark) {
+      document.documentElement.classList.add('dark-theme');
+      localStorage.setItem('arora_theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark-theme');
+      localStorage.setItem('arora_theme', 'light');
+    }
+  }, [isDark]);
 
   // Telemetry Telemetry
   const [metrics, setMetrics] = useState<TelemetryMetrics | null>(null);
@@ -151,15 +158,6 @@ export default function App() {
   const [sysLogs, setSysLogs] = useState<LogEntry[]>([]);
   const [logsSearch, setLogsSearch] = useState('');
   const [logsLevel, setLogsLevel] = useState<'ALL' | 'HTTP' | 'SYSTEM' | 'ERROR'>('ALL');
-
-  // Dynamic User Onboarding state (v4.5)
-  const [usersList, setUsersList] = useState<UserCredentials[]>([]);
-  const [loadingUsers, setLoadingUsers] = useState(false);
-  const [showUserModal, setShowUserModal] = useState(false);
-  const [newUserUsername, setNewUserUsername] = useState('');
-  const [newUserPassword, setNewUserPassword] = useState('');
-  const [newUserRole, setNewUserRole] = useState<UserRole>('user_db');
-  const [selectedAuditUser, setSelectedAuditUser] = useState<string>('ALL');
   const [autoScrollLogs, setAutoScrollLogs] = useState(true);
 
   // Security Audit Log (NEW in v4.0)
@@ -215,6 +213,10 @@ export default function App() {
   useEffect(() => {
     if (!token) return;
 
+    const shouldPollMetrics = activeTab === 'overview';
+    const shouldPollLogs = activeTab === 'logs' && userRole === 'admin_proj';
+    const shouldPollAudit = activeTab === 'overview' && userRole === 'admin_proj';
+
     const getMetrics = async () => {
       try {
         const res = await aroraFetch('/api/metrics');
@@ -222,62 +224,59 @@ export default function App() {
           const data: TelemetryMetrics = await res.json();
           setMetrics(data);
 
+          const totalOps = data.system.read_rate + data.system.write_rate;
+          const memoryAlloc = data.system.allocated_mem_mb;
+          const secondsStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          const newPoint = { time: secondsStr, ops: totalOps, mem: Number(memoryAlloc.toFixed(1)) };
           setChartData(prev => {
-            const next = [...prev];
-            next.shift();
-            const totalOps = data.system.read_rate + data.system.write_rate;
-            const memoryAlloc = data.system.allocated_mem_mb;
-            const secondsStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-            next.push({ time: secondsStr, ops: totalOps, mem: Number(memoryAlloc.toFixed(1)) });
+            const next = [...prev, newPoint];
+            if (next.length > 120) next.shift(); // keep max 120 points
             return next;
           });
         }
       } catch (err) {
-        // Silently catch
+        // silent
       }
     };
 
     const getLogs = async () => {
-      if (activeTab !== 'logs' || userRole !== 'admin_proj') return;
+      if (!shouldPollLogs) return;
       try {
         const res = await aroraFetch('/api/logs');
         if (res.ok) {
           const data: LogEntry[] = await res.json();
           setSysLogs(data || []);
         }
-      } catch (err) {
-        // Silently catch
-      }
+      } catch (err) {}
     };
 
     const getAuditLogs = async () => {
-      if (activeTab !== 'overview' || userRole !== 'admin_proj') return;
+      if (!shouldPollAudit) return;
       try {
         const res = await aroraFetch('/api/admin/audit');
         if (res.ok) {
           const data: AuditEntry[] = await res.json();
           setAuditLogs(data || []);
         }
-      } catch (err) {
-        // Silently catch
-      }
+      } catch (err) {}
     };
 
-    getMetrics();
-    getLogs();
-    getAuditLogs();
+    if (shouldPollMetrics) getMetrics();
+    if (shouldPollLogs) getLogs();
+    if (shouldPollAudit) getAuditLogs();
 
     const intervalVal = metricsTimeframe === '1m' ? 2000 : metricsTimeframe === '5m' ? 6000 : 18000;
-    const metricsInterval = setInterval(getMetrics, intervalVal);
-    const logsInterval = setInterval(getLogs, 2500);
-    const auditInterval = setInterval(getAuditLogs, 2500);
+    const metricsInterval = shouldPollMetrics ? setInterval(getMetrics, intervalVal) : null;
+    const logsInterval = shouldPollLogs ? setInterval(getLogs, 2500) : null;
+    const auditInterval = shouldPollAudit ? setInterval(getAuditLogs, 2500) : null;
 
     return () => {
-      clearInterval(metricsInterval);
-      clearInterval(logsInterval);
-      clearInterval(auditInterval);
+      if (metricsInterval) clearInterval(metricsInterval);
+      if (logsInterval) clearInterval(logsInterval);
+      if (auditInterval) clearInterval(auditInterval);
     };
   }, [token, metricsTimeframe, activeTab, userRole]);
+
 
   // Load tabs-specific data
   useEffect(() => {
@@ -288,77 +287,8 @@ export default function App() {
       loadCollections();
     } else if (activeTab === 'sql') {
       loadSQLTables();
-    } else if (activeTab === 'users') {
-      loadUsersList();
     }
   }, [activeTab, token]);
-
-  // User Management Operations (v4.5)
-  const loadUsersList = async () => {
-    if (userRole !== 'admin_proj') return;
-    setLoadingUsers(true);
-    try {
-      const res = await aroraFetch('/api/admin/users');
-      if (res.ok) {
-        const data = await res.json();
-        setUsersList(data || []);
-      }
-    } catch (err) {
-      addNotification('Failed to retrieve onboarded users.', 'error');
-    } finally {
-      setLoadingUsers(false);
-    }
-  };
-
-  const saveUserOnboard = async () => {
-    if (!newUserUsername.trim() || !newUserPassword.trim()) {
-      addNotification('Username and password cannot be empty.', 'warning');
-      return;
-    }
-    try {
-      const res = await aroraFetch('/api/admin/users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: newUserUsername.trim(),
-          password: newUserPassword.trim(),
-          role: newUserRole
-        })
-      });
-      if (res.ok) {
-        addNotification(`User "${newUserUsername}" successfully onboarded!`, 'success');
-        setShowUserModal(false);
-        setNewUserUsername('');
-        setNewUserPassword('');
-        setNewUserRole('user_db');
-        loadUsersList();
-      } else {
-        const errData = await res.json();
-        addNotification(errData.error || 'Failed to onboard user.', 'error');
-      }
-    } catch (err) {
-      addNotification('Failed to onboard user.', 'error');
-    }
-  };
-
-  const deleteUserOffboard = async (uname: string) => {
-    if (uname === 'owner') {
-      addNotification('Cannot delete project owner.', 'warning');
-      return;
-    }
-    if (!confirm(`Are you sure you want to remove access for user "${uname}"?`)) return;
-    try {
-      const res = await aroraFetch(`/api/admin/users/${encodeURIComponent(uname)}`, {
-        method: 'DELETE'
-      });
-      if (res.ok) {
-        addNotification(`User "${uname}" offboarded successfully.`, 'success');
-        loadUsersList();
-      }
-    } catch (err) {
-      addNotification('Failed to delete user.', 'error');
-    }
-  };
 
   // KV operations
   const loadKVData = async () => {
@@ -876,12 +806,6 @@ print(res.json())`;
   const totalKVPages = Math.ceil(kvData.length / kvPageSize) || 1;
   const paginatedKVData = kvData.slice((kvPage - 1) * kvPageSize, kvPage * kvPageSize);
 
-  const uniqueAuditUsers = Array.from(new Set(auditLogs.map(log => log.user)));
-  const filteredAuditLogs = auditLogs.filter(log => {
-    if (selectedAuditUser === 'ALL') return true;
-    return log.user === selectedAuditUser;
-  });
-
   // Gated Login View if not authenticated
   if (!token) {
     return (
@@ -1011,20 +935,12 @@ print(res.json())`;
           )}
 
           {userRole === 'admin_proj' && (
-            <>
-              <button 
-                className={`nav-item ${activeTab === 'users' ? 'active' : ''}`}
-                onClick={() => setActiveTab('users')}
-              >
-                <Users size={18} /> User Onboarding
-              </button>
-              <button 
-                className={`nav-item ${activeTab === 'logs' ? 'active' : ''}`}
-                onClick={() => setActiveTab('logs')}
-              >
-                <AlignLeft size={18} /> System Logs
-              </button>
-            </>
+            <button 
+              className={`nav-item ${activeTab === 'logs' ? 'active' : ''}`}
+              onClick={() => setActiveTab('logs')}
+            >
+              <AlignLeft size={18} /> System Logs
+            </button>
           )}
           
           {userRole !== 'visitor' && (
@@ -1065,7 +981,6 @@ print(res.json())`;
             {activeTab === 'sql' && 'SQL Database Workspace'}
             {activeTab === 'logs' && 'Real-time System Logs Console'}
             {activeTab === 'api-docs' && 'Database Integration Guides'}
-            {activeTab === 'users' && 'Enterprise User Onboarding & Access Control'}
           </h2>
           
           <div className="auth-bar" style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
@@ -1085,6 +1000,9 @@ print(res.json())`;
 
             <button className="btn btn-secondary btn-sm" onClick={handleClientLogout}>
               <LogOut size={14} /> Log Out
+            </button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setIsDark(!isDark)} title="Toggle theme">
+              {isDark ? '☀️ Light' : '🌙 Dark'}
             </button>
           </div>
         </header>
@@ -1189,29 +1107,12 @@ print(res.json())`;
                 {/* Audit logs terminal (Project Admin only) */}
                 {userRole === 'admin_proj' && (
                   <div className="dashboard-panel" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', marginBottom: 0, minHeight: '300px' }}>
-                    <div className="panel-header" style={{ flexWrap: 'wrap', gap: '1rem', justifyContent: 'space-between' }}>
-                      <div className="flex gap-2 align-center">
-                        <Shield size={16} /> 
-                        <h3>Live Project Activity Audit Feed</h3>
-                      </div>
-                      <div className="flex gap-3 align-center">
-                        <div className="flex gap-2 align-center">
-                          <span className="text-xs text-muted">User Filter:</span>
-                          <select 
-                            className="code-font"
-                            style={{ padding: '0.2rem 0.5rem', background: '#070913', border: '1px solid var(--border-glow)', borderRadius: '4px', color: '#fff', fontSize: '0.75rem', outline: 'none' }}
-                            value={selectedAuditUser}
-                            onChange={(e) => setSelectedAuditUser(e.target.value)}
-                          >
-                            <option value="ALL">All Users</option>
-                            {uniqueAuditUsers.map(u => <option key={u} value={u}>{u}</option>)}
-                          </select>
-                        </div>
-                        <label className="flex gap-2 align-center code-font text-xs text-muted" style={{ cursor: 'pointer' }}>
-                          <input type="checkbox" checked={autoScrollAudit} onChange={(e) => setAutoScrollAudit(e.target.checked)} />
-                          Auto-Scroll
-                        </label>
-                      </div>
+                    <div className="panel-header" style={{ flexWrap: 'wrap', gap: '1rem' }}>
+                      <h3><Shield size={16} /> Live Project Activity Audit Feed</h3>
+                      <label className="flex gap-2 align-center code-font text-xs text-muted" style={{ cursor: 'pointer' }}>
+                        <input type="checkbox" checked={autoScrollAudit} onChange={(e) => setAutoScrollAudit(e.target.checked)} />
+                        Auto-Scroll
+                      </label>
                     </div>
                     <div className="panel-body p-0" style={{ flexGrow: 1, position: 'relative', background: '#030406', minHeight: '220px' }}>
                       <div className="logs-terminal code-font" style={{
@@ -1219,7 +1120,7 @@ print(res.json())`;
                         padding: '1rem 1.5rem', overflowY: 'auto', fontSize: '0.8rem', lineHeight: 1.5,
                         display: 'flex', flexDirection: 'column', gap: '0.35rem'
                       }}>
-                        {filteredAuditLogs.map((entry, idx) => (
+                        {auditLogs.map((entry, idx) => (
                           <div key={idx} style={{ color: entry.action.includes('LOGIN') || entry.action.includes('LOGOUT') ? 'var(--color-purple)' : entry.action.includes('PUT') || entry.action.includes('EXECUTE') ? 'var(--color-cyan)' : '#ff5555' }}>
                             <span style={{ color: '#4f5e71', marginRight: '0.5rem' }}>
                               [{new Date(entry.timestamp).toLocaleTimeString()}]
@@ -1229,8 +1130,8 @@ print(res.json())`;
                             {entry.details}
                           </div>
                         ))}
-                        {filteredAuditLogs.length === 0 && (
-                          <div className="text-center text-muted py-5" style={{ margin: 'auto' }}>No operations logged matching the criteria.</div>
+                        {auditLogs.length === 0 && (
+                          <div className="text-center text-muted py-5" style={{ margin: 'auto' }}>No operations logged yet.</div>
                         )}
                         {autoScrollAudit && <div ref={(el) => el?.scrollIntoView({ behavior: 'smooth' })} />}
                       </div>
@@ -1911,78 +1812,6 @@ WantedBy=multi-user.target`}
             </div>
           </div>
         )}
-        {/* VIEW: User Onboarding & Management (v4.5) */}
-        {activeTab === 'users' && userRole === 'admin_proj' && (
-          <div className="tab-content">
-            <div className="dashboard-panel">
-              <div className="panel-header">
-                <h3>Active Database Users & Account Roles</h3>
-                <button className="btn btn-primary" onClick={() => {
-                  setNewUserUsername('');
-                  setNewUserPassword('');
-                  setNewUserRole('user_db');
-                  setShowUserModal(true);
-                }}>
-                  <Plus size={16} /> Onboard New User
-                </button>
-              </div>
-              <div className="panel-body p-0">
-                <div className="table-container">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Username</th>
-                        <th>User Role Privilege</th>
-                        <th style={{ width: '150px' }} className="text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {loadingUsers ? (
-                        <tr>
-                          <td colSpan={3} className="text-center py-5">
-                            <RefreshCw className="spinner" /> Loading active users database...
-                          </td>
-                        </tr>
-                      ) : usersList.length === 0 ? (
-                        <tr>
-                          <td colSpan={3} className="text-center text-muted py-5">
-                            No users registered.
-                          </td>
-                        </tr>
-                      ) : usersList.map(usr => (
-                        <tr key={usr.Username}>
-                          <td className="code-font font-weight-bold" style={{ color: 'var(--color-cyan)' }}>{usr.Username}</td>
-                          <td>
-                            <span className="badge" style={{
-                              background: usr.Role === 'admin_proj' ? 'rgba(217, 119, 6, 0.15)' : usr.Role === 'admin_db' ? 'rgba(99, 102, 241, 0.15)' : 'rgba(16, 185, 129, 0.15)',
-                              color: usr.Role === 'admin_proj' ? '#f59e0b' : usr.Role === 'admin_db' ? '#818cf8' : '#34d399',
-                              border: usr.Role === 'admin_proj' ? '1px solid rgba(217, 119, 6, 0.2)' : usr.Role === 'admin_db' ? '1px solid rgba(99, 102, 241, 0.2)' : '1px solid rgba(16, 185, 129, 0.2)',
-                              padding: '0.2rem 0.5rem', borderRadius: '6px', fontSize: '0.75rem', textTransform: 'uppercase', fontWeight: 600
-                            }}>
-                              {usr.Role === 'admin_proj' && 'Project Admin'}
-                              {usr.Role === 'admin_db' && 'DB Admin (DBA)'}
-                              {usr.Role === 'user_db' && 'DB User'}
-                              {usr.Role === 'visitor' && 'Visitor'}
-                            </span>
-                          </td>
-                          <td className="text-right">
-                            {usr.Username !== 'owner' ? (
-                              <button className="btn-action btn-delete" onClick={() => deleteUserOffboard(usr.Username)}>
-                                <Trash2 size={14} />
-                              </button>
-                            ) : (
-                              <span className="text-xs text-muted">Permanent Owner</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
       </main>
 
       {/* PRIVACY POLICY MODAL */}
@@ -2108,52 +1937,6 @@ WantedBy=multi-user.target`}
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={() => setShowDocModal(false)}>Cancel</button>
               <button className="btn btn-primary" onClick={saveDocument}>Save Document</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL: Onboard User */}
-      {showUserModal && (
-        <div className="modal">
-          <div className="modal-content">
-            <div className="modal-header">
-              <h3>Onboard Database Account</h3>
-              <button className="btn-close-modal" onClick={() => setShowUserModal(false)}>
-                <X size={18} />
-              </button>
-            </div>
-            <div className="modal-body">
-              <div className="form-group">
-                <label>Username</label>
-                <input 
-                  type="text" 
-                  value={newUserUsername} 
-                  onChange={(e) => setNewUserUsername(e.target.value)} 
-                  placeholder="e.g. alice"
-                />
-              </div>
-              <div className="form-group">
-                <label>Secure Password</label>
-                <input 
-                  type="password" 
-                  value={newUserPassword} 
-                  onChange={(e) => setNewUserPassword(e.target.value)} 
-                  placeholder="••••••••"
-                />
-              </div>
-              <div className="form-group">
-                <label>Privilege Access Level</label>
-                <select value={newUserRole} onChange={(e) => setNewUserRole(e.target.value as UserRole)}>
-                  <option value="admin_db">DB Admin (DBA)</option>
-                  <option value="user_db">Database User</option>
-                  <option value="visitor">Visitor (Overview Only)</option>
-                </select>
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn btn-secondary" onClick={() => setShowUserModal(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={saveUserOnboard}>Onboard User</button>
             </div>
           </div>
         </div>
