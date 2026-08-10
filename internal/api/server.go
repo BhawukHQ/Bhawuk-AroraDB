@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/BhawukHQ/Bhawuk-AroraDB/internal/config"
@@ -69,6 +70,11 @@ func (s *Server) Start() error {
 	mux.HandleFunc("POST /api/sql", s.handleSQLQuery)
 	mux.HandleFunc("GET /api/sql/tables", s.handleSQLTables)
 
+	// User Auth API
+	mux.HandleFunc("POST /api/auth/login", handleLogin)
+	mux.HandleFunc("POST /api/auth/logout", handleLogout)
+	mux.HandleFunc("GET /api/admin/audit", handleGetAuditLogs)
+
 	// Serve Static Files from embedded web UI
 	subFS, err := fs.Sub(webAssets, "web")
 	if err != nil {
@@ -112,28 +118,76 @@ func (s *Server) Stop() error {
 // Middleware
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Bypass auth for static assets and healthcheck
 		path := r.URL.Path
-		if path == "/health" || path == "/" || path == "/style.css" || path == "/app.js" || path == "/favicon.ico" {
+		
+		// Bypass auth for login, logout, static assets, and healthcheck
+		if path == "/health" || path == "/" || path == "/api/auth/login" || 
+			path == "/favicon.svg" || strings.HasPrefix(path, "/assets/") {
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		if s.cfg.Token != "" {
-			token := r.Header.Get("X-Arora-Token")
-			if token == "" {
-				// Also check query parameter
-				token = r.URL.Query().Get("token")
-			}
-			if token != s.cfg.Token {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusUnauthorized)
-				_, _ = w.Write([]byte(`{"error": "Unauthorized: invalid or missing X-Arora-Token header"}`))
-				return
-			}
+		token := r.Header.Get("X-Arora-Token")
+		if token == "" {
+			token = r.URL.Query().Get("token")
 		}
-		next.ServeHTTP(w, r)
+
+		// 1. Validate custom login session
+		if _, exists := GetSession(token); exists {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// 2. Validate global configuration token if configured
+		if s.cfg.Token != "" && token == s.cfg.Token {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Unauthorized
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error": "Unauthorized: missing or invalid session token"}`))
 	})
+}
+
+func (s *Server) resolveSession(r *http.Request) (UserSession, bool) {
+	token := r.Header.Get("X-Arora-Token")
+	if token == "" {
+		token = r.URL.Query().Get("token")
+	}
+
+	session, exists := GetSession(token)
+	if !exists {
+		// If no global security token is set, bypass as admin_proj
+		if s.cfg.Token == "" {
+			return UserSession{Username: "system_bypass", Role: RoleProjectAdmin}, true
+		}
+		return UserSession{}, false
+	}
+	return session, true
+}
+
+func (s *Server) checkRole(w http.ResponseWriter, r *http.Request, allowedRoles ...UserRole) (UserSession, bool) {
+	session, authenticated := s.resolveSession(r)
+	if !authenticated {
+		sendError(w, http.StatusUnauthorized, "Unauthorized: missing or invalid session token")
+		return UserSession{}, false
+	}
+
+	// admin_proj bypasses all constraints
+	if session.Role == RoleProjectAdmin {
+		return session, true
+	}
+
+	for _, role := range allowedRoles {
+		if session.Role == role {
+			return session, true
+		}
+	}
+
+	sendError(w, http.StatusForbidden, "Forbidden: insufficient role permissions")
+	return UserSession{}, false
 }
 
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
@@ -163,6 +217,9 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListKV(w http.ResponseWriter, r *http.Request) {
+	if _, allowed := s.checkRole(w, r, RoleDBAdmin, RoleDBUser); !allowed {
+		return
+	}
 	s.tracker.IncReads()
 	prefix := r.URL.Query().Get("prefix")
 	kvs, err := s.db.Scan(prefix)
@@ -174,6 +231,9 @@ func (s *Server) handleListKV(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetKV(w http.ResponseWriter, r *http.Request) {
+	if _, allowed := s.checkRole(w, r, RoleDBAdmin, RoleDBUser); !allowed {
+		return
+	}
 	s.tracker.IncReads()
 	key := r.PathValue("key")
 	val, err := s.db.Get([]byte(key))
@@ -186,8 +246,6 @@ func (s *Server) handleGetKV(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Send key-value response. If value is JSON, we can render it directly or as string.
-	// We'll send raw value string or let dashboard parse it.
 	sendJSON(w, http.StatusOK, map[string]string{
 		"key":   key,
 		"value": string(val),
@@ -199,10 +257,13 @@ type putKVReq struct {
 }
 
 func (s *Server) handlePutKV(w http.ResponseWriter, r *http.Request) {
+	session, allowed := s.checkRole(w, r, RoleDBAdmin)
+	if !allowed {
+		return
+	}
 	s.tracker.IncWrites()
 	key := r.PathValue("key")
 	
-	// Read payload
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		sendError(w, http.StatusBadRequest, "failed to read body")
@@ -210,13 +271,11 @@ func (s *Server) handlePutKV(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var val []byte
-	// If Content-Type is json, try to extract {"value": "..."}
 	if r.Header.Get("Content-Type") == "application/json" {
 		var req putKVReq
 		if err := json.Unmarshal(body, &req); err == nil {
 			val = []byte(req.Value)
 		} else {
-			// fallback to raw body if JSON doesn't fit
 			val = body
 		}
 	} else {
@@ -228,20 +287,36 @@ func (s *Server) handlePutKV(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	preview := string(val)
+	if len(preview) > 25 {
+		preview = preview[:25] + "..."
+	}
+	LogAuditEvent("KV_PUT", "keys", session.Username, fmt.Sprintf("Wrote key '%s' = '%s'", key, preview))
+
 	sendJSON(w, http.StatusOK, map[string]interface{}{"success": true, "key": key})
 }
 
 func (s *Server) handleDeleteKV(w http.ResponseWriter, r *http.Request) {
+	session, allowed := s.checkRole(w, r, RoleDBAdmin)
+	if !allowed {
+		return
+	}
 	s.tracker.IncDeletes()
 	key := r.PathValue("key")
 	if err := s.db.Delete([]byte(key)); err != nil {
 		sendError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	
+	LogAuditEvent("KV_DELETE", "keys", session.Username, fmt.Sprintf("Deleted key '%s'", key))
+
 	sendJSON(w, http.StatusOK, map[string]interface{}{"success": true})
 }
 
 func (s *Server) handleListCollections(w http.ResponseWriter, r *http.Request) {
+	if _, allowed := s.checkRole(w, r, RoleDBAdmin, RoleDBUser); !allowed {
+		return
+	}
 	s.tracker.IncReads()
 	cols, err := s.cm.ListCollections()
 	if err != nil {
@@ -252,6 +327,9 @@ func (s *Server) handleListCollections(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListDocuments(w http.ResponseWriter, r *http.Request) {
+	if _, allowed := s.checkRole(w, r, RoleDBAdmin, RoleDBUser); !allowed {
+		return
+	}
 	s.tracker.IncReads()
 	col := r.PathValue("collection")
 	docs, err := s.cm.ListAll(col)
@@ -263,6 +341,9 @@ func (s *Server) handleListDocuments(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetDocument(w http.ResponseWriter, r *http.Request) {
+	if _, allowed := s.checkRole(w, r, RoleDBAdmin, RoleDBUser); !allowed {
+		return
+	}
 	s.tracker.IncReads()
 	col := r.PathValue("collection")
 	id := r.PathValue("id")
@@ -282,6 +363,10 @@ func (s *Server) handleGetDocument(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePutDocument(w http.ResponseWriter, r *http.Request) {
+	session, allowed := s.checkRole(w, r, RoleDBAdmin)
+	if !allowed {
+		return
+	}
 	s.tracker.IncWrites()
 	col := r.PathValue("collection")
 	id := r.URL.Query().Get("id")
@@ -292,7 +377,6 @@ func (s *Server) handlePutDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Try to parse JSON to find or inject ID
 	var doc map[string]interface{}
 	if err := json.Unmarshal(body, &doc); err != nil {
 		sendError(w, http.StatusBadRequest, fmt.Sprintf("invalid JSON payload: %v", err))
@@ -300,11 +384,9 @@ func (s *Server) handlePutDocument(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if id == "" {
-		// Try to read _id from document
 		if docID, ok := doc["_id"].(string); ok && docID != "" {
 			id = docID
 		} else {
-			// Generate unique string ID based on timestamp
 			id = fmt.Sprintf("doc_%d", time.Now().UnixNano())
 		}
 	}
@@ -314,10 +396,16 @@ func (s *Server) handlePutDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	LogAuditEvent("DOC_PUT", col, session.Username, fmt.Sprintf("Wrote document ID '%s'", id))
+
 	sendJSON(w, http.StatusOK, map[string]interface{}{"success": true, "_id": id})
 }
 
 func (s *Server) handleDeleteDocument(w http.ResponseWriter, r *http.Request) {
+	session, allowed := s.checkRole(w, r, RoleDBAdmin)
+	if !allowed {
+		return
+	}
 	s.tracker.IncDeletes()
 	col := r.PathValue("collection")
 	id := r.PathValue("id")
@@ -325,10 +413,16 @@ func (s *Server) handleDeleteDocument(w http.ResponseWriter, r *http.Request) {
 		sendError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	LogAuditEvent("DOC_DELETE", col, session.Username, fmt.Sprintf("Deleted document ID '%s'", id))
+
 	sendJSON(w, http.StatusOK, map[string]interface{}{"success": true})
 }
 
 func (s *Server) handleQueryDocuments(w http.ResponseWriter, r *http.Request) {
+	if _, allowed := s.checkRole(w, r, RoleDBAdmin, RoleDBUser); !allowed {
+		return
+	}
 	s.tracker.IncQueries()
 	col := r.PathValue("collection")
 
@@ -355,6 +449,9 @@ func (s *Server) handleQueryDocuments(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if _, allowed := s.checkRole(w, r, RoleDBAdmin, RoleDBUser); !allowed {
+		return
+	}
 	sysStats := s.tracker.GetSystemStats()
 	keyCount, dbSize, fileCount := s.db.Stats()
 	compactionRatio := s.db.CompactionRatio()
@@ -369,28 +466,46 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCompact(w http.ResponseWriter, r *http.Request) {
+	session, allowed := s.checkRole(w, r) // only admin_proj allowed
+	if !allowed {
+		return
+	}
 	if err := s.db.Compact(); err != nil {
 		sendError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	LogAuditEvent("DB_COMPACT", "system", session.Username, "Manual storage engine compaction triggered")
 	sendJSON(w, http.StatusOK, map[string]interface{}{"success": true, "message": "compaction completed successfully"})
 }
 
 func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
+	if _, allowed := s.checkRole(w, r); !allowed {
+		return
+	}
 	sendJSON(w, http.StatusOK, logs.GetBuffer().GetEntries())
 }
 
 func (s *Server) handleBackup(w http.ResponseWriter, r *http.Request) {
+	session, allowed := s.checkRole(w, r)
+	if !allowed {
+		return
+	}
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", `attachment; filename="aroradb-backup.zip"`)
 	
 	err := CreateBackupZip(s.cfg.DBDir, w)
 	if err != nil {
 		log.Printf("ERROR: database backup creation failed: %v", err)
+	} else {
+		LogAuditEvent("DB_BACKUP", "system", session.Username, "Database zip archive backup downloaded")
 	}
 }
 
 func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
+	session, allowed := s.checkRole(w, r)
+	if !allowed {
+		return
+	}
 	log.Println("Initiating database hot restore...")
 	
 	err := r.ParseMultipartForm(20 * 1024 * 1024) // 20MB max
@@ -414,7 +529,6 @@ func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
 
 	log.Println("Unzipping restored database files...")
 	if err := RestoreBackupZip(s.cfg.DBDir, file); err != nil {
-		// attempt rollback reopen
 		dbEngine, _ := engine.NewEngine(s.cfg.DBDir, s.cfg.MaxFileSize)
 		if dbEngine != nil {
 			s.db = dbEngine
@@ -434,6 +548,8 @@ func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
 	s.db = dbEngine
 	s.cm = document.NewCollectionManager(s.db)
 
+	LogAuditEvent("DB_RESTORE", "system", session.Username, "Database hot-reload restore executed successfully")
+
 	log.Println("Database hot restore completed successfully!")
 	sendJSON(w, http.StatusOK, map[string]interface{}{"success": true, "message": "database state restored successfully"})
 }
@@ -443,6 +559,10 @@ type sqlRequest struct {
 }
 
 func (s *Server) handleSQLQuery(w http.ResponseWriter, r *http.Request) {
+	session, allowed := s.checkRole(w, r, RoleDBAdmin, RoleDBUser)
+	if !allowed {
+		return
+	}
 	s.tracker.IncQueries()
 	
 	body, err := io.ReadAll(r.Body)
@@ -457,16 +577,34 @@ func (s *Server) handleSQLQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Security Check: restricted queries for DB User role
+	if session.Role == RoleDBUser {
+		queryUpper := strings.ToUpper(strings.TrimSpace(req.Query))
+		if !strings.HasPrefix(queryUpper, "SELECT") {
+			sendError(w, http.StatusForbidden, "Forbidden: Database users are restricted to read-only queries (SELECT).")
+			return
+		}
+	}
+
 	result, err := sql.ExecuteStatement(s.db, req.Query)
 	if err != nil {
 		sendError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
+	preview := req.Query
+	if len(preview) > 50 {
+		preview = preview[:50] + "..."
+	}
+	LogAuditEvent("SQL_EXECUTE", "sql", session.Username, fmt.Sprintf("Executed SQL: %s", preview))
+
 	sendJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleSQLTables(w http.ResponseWriter, r *http.Request) {
+	if _, allowed := s.checkRole(w, r, RoleDBAdmin, RoleDBUser); !allowed {
+		return
+	}
 	tables, err := sql.ListTables(s.db)
 	if err != nil {
 		sendError(w, http.StatusInternalServerError, err.Error())
