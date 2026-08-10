@@ -135,41 +135,148 @@ func getNestedValue(obj interface{}, path string) (interface{}, bool) {
 
 // Helper: check if document value matches query criteria
 func matches(docVal interface{}, queryVal interface{}) bool {
-	// Simple type checks
-	switch qv := queryVal.(type) {
-	case float64:
-		dvFloat, ok := docVal.(float64)
-		if ok {
-			return dvFloat == qv
+	// If queryVal is a map, check if it contains query operators
+	qMap, ok := queryVal.(map[string]interface{})
+	if ok {
+		hasOperator := false
+		for k := range qMap {
+			if strings.HasPrefix(k, "$") {
+				hasOperator = true
+				break
+			}
 		}
-		// If docVal is an int, convert it
-		dvInt, ok := docVal.(int)
-		if ok {
-			return float64(dvInt) == qv
+
+		if hasOperator {
+			for op, targetVal := range qMap {
+				switch op {
+				case "$eq":
+					if !compareValues(docVal, targetVal, "==") {
+						return false
+					}
+				case "$ne":
+					if !compareValues(docVal, targetVal, "!=") {
+						return false
+					}
+				case "$gt":
+					if !compareValues(docVal, targetVal, ">") {
+						return false
+					}
+				case "$gte":
+					if !compareValues(docVal, targetVal, ">=") {
+						return false
+					}
+				case "$lt":
+					if !compareValues(docVal, targetVal, "<") {
+						return false
+					}
+				case "$lte":
+					if !compareValues(docVal, targetVal, "<=") {
+						return false
+					}
+				case "$in":
+					targets, ok := targetVal.([]interface{})
+					if !ok {
+						return false
+					}
+					matched := false
+					for _, t := range targets {
+						if compareValues(docVal, t, "==") {
+							matched = true
+							break
+						}
+					}
+					if !matched {
+						return false
+					}
+				case "$contains":
+					switch dv := docVal.(type) {
+					case string:
+						tvStr := fmt.Sprintf("%v", targetVal)
+						if !strings.Contains(strings.ToLower(dv), strings.ToLower(tvStr)) {
+							return false
+						}
+					case []interface{}:
+						matched := false
+						for _, item := range dv {
+							if compareValues(item, targetVal, "==") {
+								matched = true
+								break
+							}
+						}
+						if !matched {
+							return false
+						}
+					default:
+						return false
+					}
+				}
+			}
+			return true
 		}
-	case string:
-		dvStr, ok := docVal.(string)
-		if ok {
-			return dvStr == qv
-		}
-	case bool:
-		dvBool, ok := docVal.(bool)
-		if ok {
-			return dvBool == qv
-		}
-	case int:
-		dvInt, ok := docVal.(int)
-		if ok {
-			return dvInt == qv
-		}
-		dvFloat, ok := docVal.(float64)
-		if ok {
-			return dvFloat == float64(qv)
-		}
-	case nil:
-		return docVal == nil
 	}
 
-	// Fallback to string comparison for unhandled types
-	return fmt.Sprintf("%v", docVal) == fmt.Sprintf("%v", queryVal)
+	return compareValues(docVal, queryVal, "==")
+}
+
+func compareValues(val1, val2 interface{}, op string) bool {
+	if val1 == nil || val2 == nil {
+		if op == "==" {
+			return val1 == val2
+		} else if op == "!=" {
+			return val1 != val2
+		}
+		return false
+	}
+
+	// Try numeric comparison
+	n1, isNum1 := toFloat64(val1)
+	n2, isNum2 := toFloat64(val2)
+	if isNum1 && isNum2 {
+		switch op {
+		case "==": return n1 == n2
+		case "!=": return n1 != n2
+		case ">":  return n1 > n2
+		case ">=": return n1 >= n2
+		case "<":  return n1 < n2
+		case "<=": return n1 <= n2
+		}
+	}
+
+	// Boolean comparison
+	b1, isBool1 := val1.(bool)
+	b2, isBool2 := val2.(bool)
+	if isBool1 && isBool2 {
+		if op == "==" {
+			return b1 == b2
+		} else if op == "!=" {
+			return b1 != b2
+		}
+		return false
+	}
+
+	// String comparison (fallback)
+	s1 := strings.ToLower(fmt.Sprintf("%v", val1))
+	s2 := strings.ToLower(fmt.Sprintf("%v", val2))
+	switch op {
+	case "==": return s1 == s2
+	case "!=": return s1 != s2
+	case ">":  return s1 > s2
+	case ">=": return s1 >= s2
+	case "<":  return s1 < s2
+	case "<=": return s1 <= s2
+	}
+	return false
+}
+
+func toFloat64(val interface{}) (float64, bool) {
+	switch v := val.(type) {
+	case float64: return v, true
+	case float32: return float64(v), true
+	case int:     return float64(v), true
+	case int64:   return float64(v), true
+	case int32:   return float64(v), true
+	case uint32:  return float64(v), true
+	case uint64:  return float64(v), true
+	}
+	return 0, false
 }
