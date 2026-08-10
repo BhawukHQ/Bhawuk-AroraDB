@@ -2,9 +2,10 @@ import { useState, useEffect } from 'react';
 import { 
   Activity, Database, FileCode, Terminal, BookOpen, Key, 
   RefreshCw, Plus, Trash2, Edit, Search, 
-  Folder, Play, ChevronRight, X, Clipboard, CheckCircle
+  Folder, Play, ChevronRight, X, Clipboard, CheckCircle,
+  Download, Upload, AlignLeft, Sliders, Server, Info
 } from 'lucide-react';
-import { ResponsiveContainer, AreaChart, Area, Tooltip } from 'recharts';
+import { ResponsiveContainer, AreaChart, Area, Tooltip, XAxis } from 'recharts';
 import './App.css';
 
 // Type Definitions
@@ -32,9 +33,15 @@ interface KeyVal {
   Value: string;
 }
 
+interface LogEntry {
+  timestamp: string;
+  message: string;
+}
+
 interface ChartDataPoint {
   time: string;
   ops: number;
+  mem: number;
 }
 
 interface Notification {
@@ -43,15 +50,24 @@ interface Notification {
   id: number;
 }
 
+interface QueryRule {
+  field: string;
+  op: string;
+  value: string;
+}
+
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'overview' | 'kv' | 'docs' | 'console' | 'api-docs'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'kv' | 'docs' | 'console' | 'api-docs' | 'logs'>('overview');
   const [token, setToken] = useState(localStorage.getItem('arora_token') || '');
   const [tokenInput, setTokenInput] = useState(token);
   const [isConnected, setIsConnected] = useState(true);
 
   // Telemetry Telemetry
   const [metrics, setMetrics] = useState<TelemetryMetrics | null>(null);
-  const [chartData, setChartData] = useState<ChartDataPoint[]>(Array(15).fill(0).map((_, i) => ({ time: `${i * 2}s`, ops: 0 })));
+  const [chartData, setChartData] = useState<ChartDataPoint[]>(
+    Array(20).fill(0).map((_, i) => ({ time: `:${i * 2}s`, ops: 0, mem: 0 }))
+  );
+  const [metricsTimeframe, setMetricsTimeframe] = useState<'1m' | '5m' | '15m'>('1m');
 
   // KV Store
   const [kvSearch, setKvSearch] = useState('');
@@ -60,6 +76,11 @@ export default function App() {
   const [showKVModal, setShowKVModal] = useState(false);
   const [kvEditKey, setKvEditKey] = useState('');
   const [kvEditVal, setKvEditVal] = useState('');
+  const [selectedKV, setSelectedKV] = useState<KeyVal | null>(null); // for sliding side-sheet
+  
+  // KV Pagination
+  const [kvPage, setKvPage] = useState(1);
+  const kvPageSize = 10;
 
   // Documents
   const [collections, setCollections] = useState<string[]>([]);
@@ -70,6 +91,18 @@ export default function App() {
   const [showDocModal, setShowDocModal] = useState(false);
   const [docEditId, setDocEditId] = useState('');
   const [docEditJson, setDocEditJson] = useState('');
+  
+  // Query Builder State
+  const [qbRules, setQbRules] = useState<QueryRule[]>([]);
+  const [qbField, setQbField] = useState('');
+  const [qbOp, setQbOp] = useState('$eq');
+  const [qbVal, setQbVal] = useState('');
+
+  // Logs Explorer
+  const [sysLogs, setSysLogs] = useState<LogEntry[]>([]);
+  const [logsSearch, setLogsSearch] = useState('');
+  const [logsLevel, setLogsLevel] = useState<'ALL' | 'HTTP' | 'SYSTEM' | 'ERROR'>('ALL');
+  const [autoScrollLogs, setAutoScrollLogs] = useState(true);
 
   // Console
   const [consoleMethod, setConsoleMethod] = useState<'GET' | 'POST' | 'DELETE'>('GET');
@@ -83,11 +116,13 @@ export default function App() {
   const [codeLang, setCodeLang] = useState<'curl' | 'js' | 'python'>('curl');
   const [copiedCode, setCopiedCode] = useState(false);
 
+  // Backup & Restore
+  const [restoreFile, setRestoreFile] = useState<File | null>(null);
+  const [isRestoring, setIsRestoring] = useState(false);
+  const [isCompacting, setIsCompacting] = useState(false);
+
   // Notifications
   const [notifications, setNotifications] = useState<Notification[]>([]);
-
-  // Compaction Button Loader
-  const [isCompacting, setIsCompacting] = useState(false);
 
   // Fetch utilities with Token
   const aroraFetch = async (path: string, options: RequestInit = {}) => {
@@ -115,10 +150,10 @@ export default function App() {
     setNotifications(prev => [...prev, { message, type, id }]);
     setTimeout(() => {
       setNotifications(prev => prev.filter(n => n.id !== id));
-    }, 4000);
+    }, 4500);
   };
 
-  // Poll metrics
+  // Poll metrics and logs
   useEffect(() => {
     const getMetrics = async () => {
       try {
@@ -127,24 +162,47 @@ export default function App() {
           const data: TelemetryMetrics = await res.json();
           setMetrics(data);
 
-          // Update chart
+          // Update chart data point
           setChartData(prev => {
             const next = [...prev];
             next.shift();
             const totalOps = data.system.read_rate + data.system.write_rate;
-            next.push({ time: `${new Date().toLocaleTimeString()}`, ops: totalOps });
+            const memoryAlloc = data.system.allocated_mem_mb;
+            const secondsStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            next.push({ time: secondsStr, ops: totalOps, mem: Number(memoryAlloc.toFixed(1)) });
             return next;
           });
         }
       } catch (err) {
-        // Handle metric errors silently during boot or auth mismatches
+        // Silently catch
+      }
+    };
+
+    const getLogs = async () => {
+      if (activeTab !== 'logs') return;
+      try {
+        const res = await aroraFetch('/api/logs');
+        if (res.ok) {
+          const data: LogEntry[] = await res.json();
+          setSysLogs(data || []);
+        }
+      } catch (err) {
+        // Silently catch
       }
     };
 
     getMetrics();
-    const interval = setInterval(getMetrics, 2000);
-    return () => clearInterval(interval);
-  }, [token]);
+    getLogs();
+
+    const intervalVal = metricsTimeframe === '1m' ? 2000 : metricsTimeframe === '5m' ? 6000 : 18000;
+    const metricsInterval = setInterval(getMetrics, intervalVal);
+    const logsInterval = setInterval(getLogs, 2500);
+
+    return () => {
+      clearInterval(metricsInterval);
+      clearInterval(logsInterval);
+    };
+  }, [token, metricsTimeframe, activeTab]);
 
   // Load tabs-specific data
   useEffect(() => {
@@ -164,6 +222,7 @@ export default function App() {
         const data: KeyVal[] = await res.json();
         // Filter out JSON docs so only raw KVs remain in KV browser
         setKvData(data ? data.filter(item => !item.Key.startsWith('doc:')) : []);
+        setKvPage(1); // reset to page 1
       }
     } catch (err) {
       addNotification('Failed to retrieve KV records.', 'error');
@@ -210,6 +269,7 @@ export default function App() {
       const res = await aroraFetch(`/api/kv/${encodeURIComponent(key)}`, { method: 'DELETE' });
       if (res.ok) {
         addNotification(`Key "${key}" deleted.`, 'success');
+        if (selectedKV?.Key === key) setSelectedKV(null);
         loadKVData();
       }
     } catch (err) {
@@ -239,7 +299,6 @@ export default function App() {
     try {
       let res;
       if (docQuery.trim()) {
-        // Validate filter syntax
         try {
           JSON.parse(docQuery);
         } catch (e) {
@@ -273,7 +332,7 @@ export default function App() {
 
   const saveDocument = async () => {
     try {
-      JSON.parse(docEditJson); // validate
+      JSON.parse(docEditJson);
     } catch (e) {
       addNotification('Body must be a valid JSON document.', 'warning');
       return;
@@ -321,7 +380,6 @@ export default function App() {
       return;
     }
     setActiveCollection(cleanColName);
-    // write init meta to instantiate
     aroraFetch(`/api/documents/${cleanColName}?id=init_meta`, {
       method: 'POST',
       body: JSON.stringify({ description: 'Collection initialized', _id: 'init_meta' })
@@ -336,12 +394,61 @@ export default function App() {
     try {
       const res = await aroraFetch('/api/admin/compact', { method: 'POST' });
       if (res.ok) {
-        addNotification('Database compaction completed. Stale entries purged.', 'success');
+        addNotification('Database compaction completed. Stale logs purged.', 'success');
       }
     } catch (err) {
-      addNotification('Failed to execute db compaction.', 'error');
+      addNotification('Failed to execute database compaction.', 'error');
     } finally {
       setIsCompacting(false);
+    }
+  };
+
+  // Backup & Restore
+  const triggerBackup = () => {
+    const url = `/api/admin/backup${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+    window.location.href = url;
+    addNotification('Downloading database backup archive...', 'success');
+  };
+
+  const handleRestoreSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!restoreFile) {
+      addNotification('Please select a backup zip file first.', 'warning');
+      return;
+    }
+
+    if (!confirm('WARNING: Restoring will overwrite ALL current database records. Proceed?')) return;
+    
+    setIsRestoring(true);
+    const formData = new FormData();
+    formData.append('backup', restoreFile);
+
+    try {
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers['X-Arora-Token'] = token;
+      }
+      
+      const res = await fetch('/api/admin/restore', {
+        method: 'POST',
+        headers,
+        body: formData
+      });
+
+      if (res.ok) {
+        addNotification('Database restore complete! Hot-reload loaded successfully.', 'success');
+        setRestoreFile(null);
+        // refresh views
+        if (activeTab === 'kv') loadKVData();
+        else if (activeTab === 'docs') loadCollections();
+      } else {
+        const data = await res.json();
+        addNotification(data.error || 'Restore failed.', 'error');
+      }
+    } catch (err) {
+      addNotification('Failed to upload and restore backup.', 'error');
+    } finally {
+      setIsRestoring(false);
     }
   };
 
@@ -386,6 +493,68 @@ export default function App() {
     setToken(tokenInput);
     localStorage.setItem('arora_token', tokenInput);
     addNotification('Token applied.', 'success');
+  };
+
+  // Query Builder helper additions
+  const addQueryRule = () => {
+    if (!qbField.trim()) {
+      addNotification('Field path cannot be empty.', 'warning');
+      return;
+    }
+    if (!qbVal.trim()) {
+      addNotification('Value field cannot be empty.', 'warning');
+      return;
+    }
+    const newRule: QueryRule = { field: qbField, op: qbOp, value: qbVal };
+    setQbRules(prev => [...prev, newRule]);
+    
+    // Compile and set text query
+    compileRulesToQuery([...qbRules, newRule]);
+    
+    setQbField('');
+    setQbVal('');
+  };
+
+  const removeQueryRule = (idx: number) => {
+    const updated = qbRules.filter((_, i) => i !== idx);
+    setQbRules(updated);
+    compileRulesToQuery(updated);
+  };
+
+  const compileRulesToQuery = (rules: QueryRule[]) => {
+    if (rules.length === 0) {
+      setDocQuery('');
+      return;
+    }
+    const filterObj: Record<string, any> = {};
+    rules.forEach(rule => {
+      // Parse query value to type (int, float, boolean, string)
+      let parsedVal: any = rule.value;
+      if (rule.value === 'true') parsedVal = true;
+      else if (rule.value === 'false') parsedVal = false;
+      else if (!isNaN(Number(rule.value)) && rule.value.trim() !== '') parsedVal = Number(rule.value);
+      else if (rule.value.startsWith('[') && rule.value.endsWith(']')) {
+        // Parse array format (e.g. ["admin", "user"])
+        try {
+          parsedVal = JSON.parse(rule.value);
+        } catch {
+          parsedVal = rule.value;
+        }
+      }
+
+      if (rule.op === '$eq') {
+        filterObj[rule.field] = parsedVal;
+      } else {
+        filterObj[rule.field] = filterObj[rule.field] || {};
+        filterObj[rule.field][rule.op] = parsedVal;
+      }
+    });
+    setDocQuery(JSON.stringify(filterObj, null, 2));
+  };
+
+  const clearQueryBuilder = () => {
+    setQbRules([]);
+    setDocQuery('');
   };
 
   // Code snippets generator
@@ -468,30 +637,32 @@ print(res.json())`;
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
+  // Filter logs based on filters
+  const filteredLogs = sysLogs.filter(log => {
+    const textMatch = log.message.toLowerCase().includes(logsSearch.toLowerCase());
+    if (!textMatch) return false;
+    
+    if (logsLevel === 'ALL') return true;
+    if (logsLevel === 'ERROR') return log.message.toLowerCase().includes('error') || log.message.toLowerCase().includes('critical');
+    if (logsLevel === 'HTTP') return log.message.includes('GET ') || log.message.includes('POST ') || log.message.includes('DELETE ');
+    if (logsLevel === 'SYSTEM') return !log.message.includes('GET ') && !log.message.includes('POST ') && !log.message.includes('DELETE ');
+    return true;
+  });
+
+  // KV Pagination helpers
+  const totalKVPages = Math.ceil(kvData.length / kvPageSize) || 1;
+  const paginatedKVData = kvData.slice((kvPage - 1) * kvPageSize, kvPage * kvPageSize);
+
   return (
     <div className="app-container">
-      {/* Background glow filters */}
       <div className="glow-bg glow-purple"></div>
       <div className="glow-bg glow-cyan"></div>
 
       {/* Notifications Drawer */}
-      <div style={{ position: 'fixed', bottom: '20px', right: '20px', zIndex: 1000, display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      <div className="notifications-container">
         {notifications.map(n => (
-          <div key={n.id} style={{
-            padding: '0.85rem 1.25rem',
-            borderRadius: '10px',
-            background: n.type === 'success' ? 'rgba(46, 196, 182, 0.9)' : n.type === 'warning' ? 'rgba(255, 159, 28, 0.9)' : 'rgba(255, 51, 102, 0.9)',
-            color: '#fff',
-            fontSize: '0.85rem',
-            fontWeight: 600,
-            boxShadow: '0 8px 25px rgba(0,0,0,0.3)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            backdropFilter: 'blur(10px)',
-            border: '1px solid rgba(255,255,255,0.08)'
-          }}>
-            <CheckCircle size={16} />
+          <div key={n.id} className={`notification-toast toast-${n.type}`}>
+            <Info size={16} />
             <span>{n.message}</span>
           </div>
         ))}
@@ -505,7 +676,7 @@ print(res.json())`;
           </div>
           <div className="logo-text">
             <h1>AroraDB</h1>
-            <span>v1.0.0</span>
+            <span>v2.0.0</span>
           </div>
         </div>
 
@@ -514,7 +685,7 @@ print(res.json())`;
             className={`nav-item ${activeTab === 'overview' ? 'active' : ''}`}
             onClick={() => setActiveTab('overview')}
           >
-            <Activity size={18} /> Overview
+            <Activity size={18} /> Telemetry
           </button>
           <button 
             className={`nav-item ${activeTab === 'kv' ? 'active' : ''}`}
@@ -535,17 +706,23 @@ print(res.json())`;
             <Terminal size={18} /> Console
           </button>
           <button 
+            className={`nav-item ${activeTab === 'logs' ? 'active' : ''}`}
+            onClick={() => setActiveTab('logs')}
+          >
+            <AlignLeft size={18} /> System Logs
+          </button>
+          <button 
             className={`nav-item ${activeTab === 'api-docs' ? 'active' : ''}`}
             onClick={() => setActiveTab('api-docs')}
           >
-            <BookOpen size={18} /> API & Hosting
+            <BookOpen size={18} /> Documentation
           </button>
         </nav>
 
         <div className="connection-status">
           <div className={`status-indicator ${isConnected ? 'online' : 'offline'}`}></div>
           <div className="status-info">
-            <p>Status: {isConnected ? 'Connected' : 'Offline'}</p>
+            <p>{isConnected ? 'Connected' : 'Offline'}</p>
             <span>{window.location.host}</span>
           </div>
         </div>
@@ -555,11 +732,12 @@ print(res.json())`;
       <main className="main-content">
         <header className="top-bar">
           <h2>
-            {activeTab === 'overview' && 'Telemetry & System Health'}
-            {activeTab === 'kv' && 'Key-Value Database Browser'}
-            {activeTab === 'docs' && 'JSON Document Collections Manager'}
-            {activeTab === 'console' && 'Interactive API Query Console'}
-            {activeTab === 'api-docs' && 'Developer API Guides & Integration'}
+            {activeTab === 'overview' && 'System Telemetry & Telemetry'}
+            {activeTab === 'kv' && 'Key-Value Store Browser'}
+            {activeTab === 'docs' && 'Document Collection Explorer'}
+            {activeTab === 'console' && 'Interactive API Playground'}
+            {activeTab === 'logs' && 'Real-time System Logs Console'}
+            {activeTab === 'api-docs' && 'Database Integration Guides'}
           </h2>
           <div className="auth-bar">
             <div className="token-input-wrapper">
@@ -584,7 +762,7 @@ print(res.json())`;
                   <Database size={20} />
                 </div>
                 <div className="stat-details">
-                  <h3>Total Keys</h3>
+                  <h3>Active Keys</h3>
                   <p>{metrics?.key_count.toLocaleString() ?? '0'}</p>
                 </div>
               </div>
@@ -593,7 +771,7 @@ print(res.json())`;
                   <Activity size={20} />
                 </div>
                 <div className="stat-details">
-                  <h3>Storage Size</h3>
+                  <h3>Logical Size</h3>
                   <p>{formatBytes(metrics?.db_size_bytes ?? 0)}</p>
                 </div>
               </div>
@@ -602,17 +780,17 @@ print(res.json())`;
                   <FileCode size={20} />
                 </div>
                 <div className="stat-details">
-                  <h3>Data Files</h3>
+                  <h3>Catalog Files</h3>
                   <p>{metrics?.file_count ?? '0'}</p>
                 </div>
               </div>
               <div className="stat-card">
                 <div className="stat-icon green">
-                  <Terminal size={20} />
+                  <Server size={20} />
                 </div>
                 <div className="stat-details">
-                  <h3>Heap Allocated</h3>
-                  <p>{metrics?.system.allocated_mem_mb.toFixed(1) ?? '0.0'} MB</p>
+                  <h3>RAM Footprint</h3>
+                  <p>{metrics?.system.allocated_mem_mb.toFixed(2) ?? '0.00'} MB</p>
                 </div>
               </div>
             </div>
@@ -621,23 +799,40 @@ print(res.json())`;
               {/* Telemetry charts */}
               <div className="dashboard-panel">
                 <div className="panel-header">
-                  <h3>Operations Rates (Ops/sec)</h3>
-                  <span className="live-tag">
-                    <span className="pulse-dot"></span> LIVE
-                  </span>
+                  <h3>Telemetry Charts</h3>
+                  <div className="flex gap-2">
+                    <button 
+                      className={`btn btn-sm ${metricsTimeframe === '1m' ? 'btn-primary' : 'btn-secondary'}`}
+                      onClick={() => setMetricsTimeframe('1m')}
+                    >1m</button>
+                    <button 
+                      className={`btn btn-sm ${metricsTimeframe === '5m' ? 'btn-primary' : 'btn-secondary'}`}
+                      onClick={() => setMetricsTimeframe('5m')}
+                    >5m</button>
+                    <button 
+                      className={`btn btn-sm ${metricsTimeframe === '15m' ? 'btn-primary' : 'btn-secondary'}`}
+                      onClick={() => setMetricsTimeframe('15m')}
+                    >15m</button>
+                  </div>
                 </div>
                 <div className="panel-body">
-                  <div style={{ width: '100%', height: 160 }}>
+                  <div style={{ width: '100%', height: 180 }}>
                     <ResponsiveContainer>
                       <AreaChart data={chartData}>
                         <defs>
                           <linearGradient id="colorOps" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="var(--color-cyan)" stopOpacity={0.3}/>
+                            <stop offset="5%" stopColor="var(--color-cyan)" stopOpacity={0.35}/>
                             <stop offset="95%" stopColor="var(--color-cyan)" stopOpacity={0}/>
                           </linearGradient>
+                          <linearGradient id="colorMem" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="var(--color-purple)" stopOpacity={0.35}/>
+                            <stop offset="95%" stopColor="var(--color-purple)" stopOpacity={0}/>
+                          </linearGradient>
                         </defs>
-                        <Tooltip contentStyle={{ background: '#0b0c10', border: '1px solid rgba(255,255,255,0.08)' }} />
-                        <Area type="monotone" dataKey="ops" stroke="var(--color-cyan)" strokeWidth={2} fillOpacity={1} fill="url(#colorOps)" />
+                        <XAxis dataKey="time" stroke="var(--text-muted)" fontSize={9} />
+                        <Tooltip contentStyle={{ background: '#07080c', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '10px' }} />
+                        <Area name="Ops/sec" type="monotone" dataKey="ops" stroke="var(--color-cyan)" strokeWidth={2} fillOpacity={1} fill="url(#colorOps)" />
+                        <Area name="RAM (MB)" type="monotone" dataKey="mem" stroke="var(--color-purple)" strokeWidth={2} fillOpacity={1} fill="url(#colorMem)" />
                       </AreaChart>
                     </ResponsiveContainer>
                   </div>
@@ -654,10 +849,10 @@ print(res.json())`;
                 </div>
               </div>
 
-              {/* Maintenance Actions */}
+              {/* Maintenance & Backups */}
               <div className="dashboard-panel">
                 <div className="panel-header">
-                  <h3>System Status</h3>
+                  <h3>Operations & backups</h3>
                 </div>
                 <div className="panel-body">
                   <div className="sys-info-list">
@@ -666,27 +861,45 @@ print(res.json())`;
                       <strong>{metrics?.compaction_ratio.toFixed(3) ?? '1.000'}</strong>
                     </div>
                     <div className="info-row">
-                      <span>Active Goroutines:</span>
+                      <span>Goroutines:</span>
                       <strong>{metrics?.system.num_goroutines ?? 0}</strong>
                     </div>
-                    <div className="info-row">
-                      <span>Reads Total:</span>
-                      <strong>{metrics?.system.total_reads.toLocaleString() ?? 0}</strong>
-                    </div>
-                    <div className="info-row">
-                      <span>Writes Total:</span>
-                      <strong>{metrics?.system.total_writes.toLocaleString() ?? 0}</strong>
-                    </div>
                   </div>
-                  <div className="action-box">
-                    <p>Clean database data logs and eliminate stale records, rebuilding the indexes.</p>
+                  
+                  <div className="flex flex-column gap-3 mt-3">
+                    <button 
+                      className="btn btn-secondary w-full"
+                      onClick={triggerBackup}
+                    >
+                      <Download size={14} /> Download Backup
+                    </button>
+                    
+                    <form onSubmit={handleRestoreSubmit} className="flex gap-2 align-center w-full">
+                      <input 
+                        type="file" 
+                        accept=".zip" 
+                        onChange={(e) => setRestoreFile(e.target.files?.[0] || null)}
+                        style={{ display: 'none' }}
+                        id="restore-file-upload"
+                      />
+                      <label htmlFor="restore-file-upload" className="btn btn-secondary flex-grow-1" style={{ cursor: 'pointer' }}>
+                        {restoreFile ? restoreFile.name : 'Select Zip Backup'}
+                      </label>
+                      <button 
+                        type="submit" 
+                        className="btn btn-primary-outline"
+                        disabled={isRestoring}
+                      >
+                        {isRestoring ? <RefreshCw size={14} className="spinner" /> : <Upload size={14} />} Restore
+                      </button>
+                    </form>
+
                     <button 
                       className="btn btn-glow-purple w-full"
                       disabled={isCompacting}
                       onClick={runCompaction}
                     >
-                      {isCompacting ? <RefreshCw size={16} className="spinner" /> : <RefreshCw size={16} />} 
-                      Trigger Compaction
+                      {isCompacting ? <RefreshCw size={14} className="spinner" /> : <RefreshCw size={14} />} Compaction
                     </button>
                   </div>
                 </div>
@@ -698,72 +911,129 @@ print(res.json())`;
         {/* VIEW: KV Store */}
         {activeTab === 'kv' && (
           <div className="tab-content">
-            <div className="dashboard-panel">
-              <div className="panel-header">
-                <div className="search-bar">
-                  <Search size={16} />
-                  <input 
-                    type="text" 
-                    placeholder="Search keys by prefix..." 
-                    value={kvSearch}
-                    onChange={(e) => setKvSearch(e.target.value)}
-                  />
+            <div className="kv-view-split" style={{ display: 'flex', gap: '1.5rem', height: '100%' }}>
+              <div className="kv-main-panel" style={{ flexGrow: 1, minWidth: 0 }}>
+                <div className="dashboard-panel">
+                  <div className="panel-header">
+                    <div className="search-bar">
+                      <Search size={16} />
+                      <input 
+                        type="text" 
+                        placeholder="Search keys by prefix..." 
+                        value={kvSearch}
+                        onChange={(e) => setKvSearch(e.target.value)}
+                      />
+                    </div>
+                    <button className="btn btn-primary" onClick={() => {
+                      setKvEditKey('');
+                      setKvEditVal('');
+                      setShowKVModal(true);
+                    }}>
+                      <Plus size={16} /> Add Key
+                    </button>
+                  </div>
+                  <div className="panel-body p-0">
+                    <div className="table-container">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Key</th>
+                            <th>Value Preview</th>
+                            <th style={{ width: '150px' }} className="text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {loadingKV ? (
+                            <tr>
+                              <td colSpan={3} className="text-center py-5">
+                                <RefreshCw className="spinner" /> Loading KV records...
+                              </td>
+                            </tr>
+                          ) : paginatedKVData.length === 0 ? (
+                            <tr>
+                              <td colSpan={3} className="text-center text-muted py-5">
+                                No records found.
+                              </td>
+                            </tr>
+                          ) : paginatedKVData.map(item => (
+                            <tr 
+                              key={item.Key} 
+                              className={selectedKV?.Key === item.Key ? 'selected-row' : ''}
+                              onClick={() => setSelectedKV(item)}
+                              style={{ cursor: 'pointer' }}
+                            >
+                              <td className="code-font font-weight-bold" style={{ color: 'var(--color-cyan)' }}>{item.Key}</td>
+                              <td className="code-font text-muted">
+                                {item.Value.length > 50 ? item.Value.substring(0, 50) + '...' : item.Value}
+                              </td>
+                              <td className="text-right" onClick={(e) => e.stopPropagation()}>
+                                <button className="btn-action btn-edit mr-2" onClick={() => {
+                                  setKvEditKey(item.Key);
+                                  setKvEditVal(item.Value);
+                                  setShowKVModal(true);
+                                }}>
+                                  <Edit size={14} />
+                                </button>
+                                <button className="btn-action btn-delete" onClick={() => deleteKV(item.Key)}>
+                                  <Trash2 size={14} />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Pagination */}
+                    {totalKVPages > 1 && (
+                      <div className="pagination-bar" style={{ display: 'flex', justifySelf: 'end', padding: '1rem 1.5rem', gap: '0.5rem', borderTop: '1px solid var(--border-glow)' }}>
+                        <button className="btn btn-secondary btn-sm" disabled={kvPage === 1} onClick={() => setKvPage(p => p - 1)}>Prev</button>
+                        <span className="code-font" style={{ alignSelf: 'center', fontSize: '0.85rem' }}>Page {kvPage} of {totalKVPages}</span>
+                        <button className="btn btn-secondary btn-sm" disabled={kvPage === totalKVPages} onClick={() => setKvPage(p => p + 1)}>Next</button>
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <button className="btn btn-primary" onClick={() => {
-                  setKvEditKey('');
-                  setKvEditVal('');
-                  setShowKVModal(true);
-                }}>
-                  <Plus size={16} /> Add Key
-                </button>
               </div>
-              <div className="panel-body p-0">
-                <div className="table-container">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Key</th>
-                        <th>Value Preview</th>
-                        <th style={{ width: '150px' }} className="text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {loadingKV ? (
-                        <tr>
-                          <td colSpan={3} className="text-center py-5">
-                            <RefreshCw className="spinner" /> Loading KV records...
-                          </td>
-                        </tr>
-                      ) : kvData.length === 0 ? (
-                        <tr>
-                          <td colSpan={3} className="text-center text-muted py-5">
-                            No records found.
-                          </td>
-                        </tr>
-                      ) : kvData.map(item => (
-                        <tr key={item.Key}>
-                          <td className="code-font font-weight-bold" style={{ color: 'var(--color-cyan)' }}>{item.Key}</td>
-                          <td className="code-font text-muted">
-                            {item.Value.length > 80 ? item.Value.substring(0, 80) + '...' : item.Value}
-                          </td>
-                          <td className="text-right">
-                            <button className="btn-action btn-edit mr-2" onClick={() => {
-                              setKvEditKey(item.Key);
-                              setKvEditVal(item.Value);
-                              setShowKVModal(true);
-                            }}>
-                              <Edit size={14} />
-                            </button>
-                            <button className="btn-action btn-delete" onClick={() => deleteKV(item.Key)}>
-                              <Trash2 size={14} />
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+
+              {/* Side Detail Panel (UX Upgrade) */}
+              {selectedKV && (
+                <div className="kv-side-sheet dashboard-panel" style={{ width: '380px', flexShrink: 0, height: 'fit-content' }}>
+                  <div className="panel-header">
+                    <h3 style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>Detail: {selectedKV.Key}</h3>
+                    <button className="btn-close-modal" onClick={() => setSelectedKV(null)}>
+                      <X size={16} />
+                    </button>
+                  </div>
+                  <div className="panel-body">
+                    <div className="form-group">
+                      <label>Payload Size</label>
+                      <span className="code-font text-muted" style={{ fontSize: '0.85rem' }}>{selectedKV.Value.length} bytes</span>
+                    </div>
+                    <div className="form-group">
+                      <label>Raw Value</label>
+                      <pre className="code-font" style={{
+                        background: '#040507', padding: '1rem', borderRadius: '8px', 
+                        overflowX: 'auto', maxHeight: '300px', fontSize: '0.8rem', color: '#dfdfe5',
+                        whiteSpace: 'pre-wrap'
+                      }}>
+                        {selectedKV.Value}
+                      </pre>
+                    </div>
+                    <div className="flex gap-2">
+                      <button className="btn btn-primary-outline w-full" onClick={() => {
+                        setKvEditKey(selectedKV.Key);
+                        setKvEditVal(selectedKV.Value);
+                        setShowKVModal(true);
+                      }}>Edit</button>
+                      <button className="btn btn-secondary" onClick={() => {
+                        navigator.clipboard.writeText(selectedKV.Value);
+                        addNotification('Copied value to clipboard.', 'success');
+                      }}>Copy</button>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           </div>
         )}
@@ -797,79 +1067,134 @@ print(res.json())`;
               </div>
 
               {/* Documents table */}
-              <div className="doc-main dashboard-panel">
-                <div className="panel-header">
-                  <div className="search-bar flex-grow-1 mr-3">
-                    <Search size={16} />
-                    <input 
-                      type="text" 
-                      placeholder='Filter query JSON, e.g. {"profile.role": "admin"}' 
-                      value={docQuery}
-                      onChange={(e) => setDocQuery(e.target.value)}
-                    />
+              <div className="doc-main" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                
+                {/* Advanced Query Builder (UX Enhancement) */}
+                <div className="dashboard-panel m-0">
+                  <div className="panel-header">
+                    <h3><Sliders size={16} style={{ verticalAlign: 'middle', marginRight: '5px' }} /> MongoDB Query Builder</h3>
+                    <button className="btn btn-secondary btn-sm" onClick={clearQueryBuilder}>Clear Filters</button>
                   </div>
-                  <div className="flex gap-2">
-                    <button className="btn btn-secondary" onClick={fetchDocuments}>
-                      <Play size={14} /> Query
-                    </button>
-                    <button className="btn btn-primary" onClick={() => {
-                      if (!activeCollection) return;
-                      setDocEditId('');
-                      setDocEditJson(JSON.stringify({ name: 'New Document', active: true }, null, 2));
-                      setShowDocModal(true);
-                    }}>
-                      <Plus size={14} /> Add Doc
-                    </button>
+                  <div className="panel-body">
+                    <div className="query-builder-form" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: '1rem', marginBottom: '1rem' }}>
+                      <input 
+                        type="text" 
+                        placeholder="Path (e.g., profile.age)" 
+                        value={qbField}
+                        onChange={(e) => setQbField(e.target.value)}
+                        className="code-font"
+                      />
+                      <select value={qbOp} onChange={(e) => setQbOp(e.target.value)}>
+                        <option value="$eq">Equals ($eq)</option>
+                        <option value="$ne">Not Equals ($ne)</option>
+                        <option value="$gt">Greater Than ($gt)</option>
+                        <option value="$gte">Greater or Equal ($gte)</option>
+                        <option value="$lt">Less Than ($lt)</option>
+                        <option value="$lte">Less or Equal ($lte)</option>
+                        <option value="$in">In Array ($in)</option>
+                        <option value="$contains">Contains ($contains)</option>
+                      </select>
+                      <input 
+                        type="text" 
+                        placeholder="Value (e.g. 25, admin)" 
+                        value={qbVal}
+                        onChange={(e) => setQbVal(e.target.value)}
+                        className="code-font"
+                      />
+                      <button className="btn btn-primary" onClick={addQueryRule}>Add Rule</button>
+                    </div>
+
+                    {qbRules.length > 0 && (
+                      <div className="rules-badges" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.5rem' }}>
+                        {qbRules.map((rule, i) => (
+                          <span key={i} className="rule-badge" style={{
+                            padding: '0.3rem 0.6rem', background: 'rgba(255,255,255,0.05)', 
+                            border: '1px solid var(--border-glow)', borderRadius: '6px', fontSize: '0.8rem',
+                            display: 'inline-flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-secondary)'
+                          }}>
+                            <strong className="code-font" style={{ color: 'var(--color-purple)' }}>{rule.field}</strong> {rule.op} <span className="code-font" style={{ color: 'var(--color-cyan)' }}>{rule.value}</span>
+                            <X size={12} style={{ cursor: 'pointer' }} onClick={() => removeQueryRule(i)} />
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
-                <div className="panel-body p-0">
-                  <div className="table-container">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th style={{ width: '200px' }}>ID</th>
-                          <th>Document Payload</th>
-                          <th style={{ width: '150px' }} className="text-right">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {loadingDocs ? (
+
+                <div className="dashboard-panel m-0">
+                  <div className="panel-header">
+                    <div className="search-bar flex-grow-1 mr-3">
+                      <Search size={16} />
+                      <input 
+                        type="text" 
+                        placeholder='JSON Raw Filter query (e.g. {"role":"admin"})' 
+                        value={docQuery}
+                        onChange={(e) => setDocQuery(e.target.value)}
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <button className="btn btn-secondary" onClick={fetchDocuments}>
+                        <Play size={14} /> Query
+                      </button>
+                      <button className="btn btn-primary" onClick={() => {
+                        if (!activeCollection) return;
+                        setDocEditId('');
+                        setDocEditJson(JSON.stringify({ name: 'New Document', active: true }, null, 2));
+                        setShowDocModal(true);
+                      }}>
+                        <Plus size={14} /> Add Doc
+                      </button>
+                    </div>
+                  </div>
+                  <div className="panel-body p-0">
+                    <div className="table-container">
+                      <table>
+                        <thead>
                           <tr>
-                            <td colSpan={3} className="text-center py-5">
-                              <RefreshCw className="spinner" /> Querying collection...
-                            </td>
+                             <th style={{ width: '200px' }}>ID</th>
+                             <th>Document Payload</th>
+                             <th style={{ width: '150px' }} className="text-right">Actions</th>
                           </tr>
-                        ) : documents.length === 0 ? (
-                          <tr>
-                            <td colSpan={3} className="text-center text-muted py-5">
-                              No matching documents. Select a collection or clear your query filter.
-                            </td>
-                          </tr>
-                        ) : documents.map(doc => {
-                          const id = doc._id || '';
-                          return (
-                            <tr key={id}>
-                              <td className="code-font font-weight-bold" style={{ color: 'var(--color-purple)' }}>{id}</td>
-                              <td className="code-font text-muted">
-                                {JSON.stringify(doc).length > 80 ? JSON.stringify(doc).substring(0, 80) + '...' : JSON.stringify(doc)}
-                              </td>
-                              <td className="text-right">
-                                <button className="btn-action btn-edit mr-2" onClick={() => {
-                                  setDocEditId(id);
-                                  setDocEditJson(JSON.stringify(doc, null, 2));
-                                  setShowDocModal(true);
-                                }}>
-                                  <Edit size={14} />
-                                </button>
-                                <button className="btn-action btn-delete" onClick={() => deleteDoc(id)}>
-                                  <Trash2 size={14} />
-                                </button>
+                        </thead>
+                        <tbody>
+                          {loadingDocs ? (
+                            <tr>
+                              <td colSpan={3} className="text-center py-5">
+                                <RefreshCw className="spinner" /> Querying collection...
                               </td>
                             </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+                          ) : documents.length === 0 ? (
+                            <tr>
+                              <td colSpan={3} className="text-center text-muted py-5">
+                                No matching documents. Select a collection or clear your query filter.
+                              </td>
+                            </tr>
+                          ) : documents.map(doc => {
+                            const id = doc._id || '';
+                            return (
+                              <tr key={id}>
+                                <td className="code-font font-weight-bold" style={{ color: 'var(--color-purple)' }}>{id}</td>
+                                <td className="code-font text-muted">
+                                  {JSON.stringify(doc).length > 80 ? JSON.stringify(doc).substring(0, 80) + '...' : JSON.stringify(doc)}
+                                </td>
+                                <td className="text-right">
+                                  <button className="btn-action btn-edit mr-2" onClick={() => {
+                                    setDocEditId(id);
+                                    setDocEditJson(JSON.stringify(doc, null, 2));
+                                    setShowDocModal(true);
+                                  }}>
+                                    <Edit size={14} />
+                                  </button>
+                                  <button className="btn-action btn-delete" onClick={() => deleteDoc(id)}>
+                                    <Trash2 size={14} />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -938,6 +1263,85 @@ print(res.json())`;
                   <pre className="console-output code-font">
                     {consoleResponse}
                   </pre>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* VIEW: System Logs Explorer */}
+        {activeTab === 'logs' && (
+          <div className="tab-content">
+            <div className="dashboard-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%', marginBottom: 0 }}>
+              <div className="panel-header" style={{ flexWrap: 'wrap', gap: '1rem' }}>
+                <div className="search-bar">
+                  <Search size={16} />
+                  <input 
+                    type="text" 
+                    placeholder="Filter logs by content..." 
+                    value={logsSearch}
+                    onChange={(e) => setLogsSearch(e.target.value)}
+                  />
+                </div>
+                
+                <div className="flex gap-3 align-center">
+                  <div className="flex gap-2">
+                    <button 
+                      className={`btn btn-sm ${logsLevel === 'ALL' ? 'btn-primary' : 'btn-secondary'}`}
+                      onClick={() => setLogsLevel('ALL')}
+                    >All Logs</button>
+                    <button 
+                      className={`btn btn-sm ${logsLevel === 'HTTP' ? 'btn-primary' : 'btn-secondary'}`}
+                      onClick={() => setLogsLevel('HTTP')}
+                    >HTTP</button>
+                    <button 
+                      className={`btn btn-sm ${logsLevel === 'SYSTEM' ? 'btn-primary' : 'btn-secondary'}`}
+                      onClick={() => setLogsLevel('SYSTEM')}
+                    >System</button>
+                    <button 
+                      className={`btn btn-sm ${logsLevel === 'ERROR' ? 'btn-primary' : 'btn-secondary'}`}
+                      onClick={() => setLogsLevel('ERROR')}
+                    >Errors</button>
+                  </div>
+                  
+                  <label className="flex gap-2 align-center code-font text-sm" style={{ cursor: 'pointer' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={autoScrollLogs} 
+                      onChange={(e) => setAutoScrollLogs(e.target.checked)} 
+                    />
+                    Auto-Scroll
+                  </label>
+                </div>
+              </div>
+              <div className="panel-body p-0" style={{ flexGrow: 1, position: 'relative', background: '#030406', minHeight: '400px' }}>
+                <div className="logs-terminal code-font" style={{
+                  position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                  padding: '1.5rem', overflowY: 'auto', fontSize: '0.85rem', lineHeight: 1.5,
+                  display: 'flex', flexDirection: 'column', gap: '0.25rem'
+                }}>
+                  {filteredLogs.map((entry, idx) => {
+                    const isError = entry.message.toLowerCase().includes('error') || entry.message.toLowerCase().includes('critical');
+                    const isHttp = entry.message.includes('GET ') || entry.message.includes('POST ') || entry.message.includes('DELETE ');
+                    
+                    let logColor = '#94a1b2';
+                    if (isError) logColor = '#ff5555';
+                    else if (isHttp) logColor = 'var(--color-cyan)';
+                    else if (entry.message.includes('starting') || entry.message.includes('available')) logColor = 'var(--color-purple)';
+
+                    return (
+                      <div key={idx} style={{ color: logColor }}>
+                        <span style={{ color: '#4f5e71', marginRight: '0.75rem' }}>
+                          [{new Date(entry.timestamp).toLocaleTimeString()}]
+                        </span>
+                        {entry.message}
+                      </div>
+                    );
+                  })}
+                  {filteredLogs.length === 0 && (
+                    <div className="text-center text-muted py-5">No logs available matching current criteria.</div>
+                  )}
+                  {autoScrollLogs && <div ref={(el) => el?.scrollIntoView({ behavior: 'smooth' })} />}
                 </div>
               </div>
             </div>
