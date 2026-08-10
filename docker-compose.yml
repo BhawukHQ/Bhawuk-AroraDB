@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  aroradb:
+    build: .
+    container_name: aroradb-server
+    ports:
+      - "8080:8080"
+    volumes:
+      - aroradb-data:/data
+    environment:
+      # Optional: set a pre-shared token to protect your endpoints. 
+      # Clients must send this token in the 'X-Arora-Token' header.
+      - ARORADB_TOKEN=my-secure-token
+      # Optional: custom port inside container (must match ports mapping if modified)
+      - ARORADB_PORT=8080
+      # Optional: max size of active database log file before rotation
+      - ARORADB_MAX_FILE_SIZE=10485760 # 10MB
+    restart: unless-stopped
+
+volumes:
+  aroradb-data:
+    driver: local

@@ -1,476 +1,159 @@
-# DoraDB
+# AroraDB 🚀
 
-> Building a high-performance distributed database from scratch.
->
-> **Goal:** Learn database internals, storage engines, distributed systems, networking, concurrency, and performance engineering by implementing every major component ourselves.
+> **AroraDB** is a lightweight, custom-branded, high-performance Key-Value and Document database written in Go, featuring a built-in, premium dark-themed React admin console dashboard.
 
----
-
-# Phase 0 — Foundations (2 Weeks)
-
-## Learn
-
-- Binary file formats
-- Page layout (4KB/8KB pages)
-- Disk I/O
-- Serialization & Deserialization
-- Checksums (CRC32)
-- Memory alignment
-- Cache locality
-
-### Read
-
-- Designing Data-Intensive Applications (Ch. 1–3)
-- SQLite Architecture Overview
-- Go Performance Guide
-
-## Build
-
-- File Manager
-- Disk Manager
-- Page Manager
-- Binary Encoder/Decoder
-- CRC Validation
-- Benchmark Suite
-
-**Deliverable**
-
-```
-storage/
-├── disk.go
-├── page.go
-├── file.go
-└── benchmark.go
-```
+Designed for developer workflows, scripting automation, and lightweight persistent application storage, AroraDB compiles to a single executable binary containing both the database server and its management UI.
 
 ---
 
-# Phase 1 — Storage Engine (3 Weeks)
+## Key Features
 
-## Learn
+1. **Storage Engine (Bitcask Design)**: Sequential write-ahead data logging (`aroradb.data.<id>`) coupled with a fast in-memory index (`KeyDir`). Provides high write throughput and $O(1)$ single-seek reads.
+2. **Abstract Architecture**: Engineered with clean design patterns using a decoupled Go `StorageEngine` interface (Dependency Inversion Principle), enabling future storage engine swaps.
+3. **Data Integrity**: Built-in record headers containing IEEE CRC32 checksums validating data blocks on every start and read.
+4. **Document Store**: Built-in schema-less JSON document layer organizing records into namespaces/collections, supporting field-nested query filters (e.g. `profile.role = "admin"`).
+5. **Log Compaction**: Self-contained log merging logic that cleans obsolete states, tombstone markers, and optimizes index ranges.
+6. **Embedded Admin Dashboard**: Glassmorphic, modern React + TS single-page application telemetry dashboard serving real-time system charts (Recharts), database browsers, API documentations, and an interactive query playground.
 
-- Write-Ahead Logging (WAL)
-- Crash Recovery
-- MemTables
-- SSTables
-- Immutable storage
-- Append-only design
+---
 
-### Read
-
-- Bitcask Paper
-- DDIA Chapter 3
-
-## Build
-
-- WAL
-- MemTable
-- SSTable
-- Flush Mechanism
-- Recovery on Startup
-
-**Deliverable**
+## Project Structure
 
 ```
-storage/
-├── wal/
-├── memtable/
-├── sstable/
-└── recovery/
+Bhawuk-AroraDB/
+├── cmd/
+│   └── aroradb/
+│       └── main.go           # CLI application entrypoint
+├── internal/
+│   ├── config/
+│   │   └── config.go         # Configuration loader
+│   ├── engine/
+│   │   ├── engine.go         # StorageEngine abstract interface
+│   │   ├── entry.go          # Binary serialization & CRC checksums
+│   │   ├── bitcask.go        # Append-only sequential storage engine
+│   │   └── compact.go        # Database log compaction / merge logic
+│   ├── document/
+│   │   └── collection.go     # Collection-based document indexing & queries
+│   ├── api/
+│   │   ├── server.go         # HTTP Server routers & middleware
+│   │   └── web/              # Compiled React build static files (embedded)
+│   └── metrics/
+│       └── metrics.go        # Memory, ops/sec, and disk usage tracker
+├── dashboard/                # React TypeScript Web Console Source Code
+├── scripts/
+│   └── demo.ps1              # Automation endpoint testing script
+├── Dockerfile                # Multi-stage production container setup
+└── docker-compose.yml        # Orchestration configuration
 ```
 
 ---
 
-# Phase 2 — LSM Tree (3 Weeks)
+## Quickstart
 
-## Learn
+### 1. Compile and Run
+Ensure Go 1.22+ is installed, then build the binary:
+```bash
+# Compile
+go build -o aroradb.exe ./cmd/aroradb
 
-- LSM Trees
-- Compaction
-- Bloom Filters
-- Skip Lists
-- Leveled vs Tiered Compaction
-- RocksDB Architecture
-
-### Read
-
-- RocksDB Wiki
-- LevelDB Source Code
-
-## Build
-
-- Multi-Level LSM Tree
-- Bloom Filters
-- Background Compaction
-- Manifest File
-- Snapshot Support
-- Tombstones
-
-**Deliverable**
-
+# Start database on default port 8080
+./aroradb.exe -port 8080 -dir ./data
 ```
-lsm/
-├── memtable.go
-├── sstable.go
-├── bloom.go
-├── compaction.go
-└── manifest.go
+Open your browser and navigate to `http://localhost:8080/` to access the admin telemetry console.
+
+### 2. Run Automation Demo
+We have provided a Powershell testing script in `scripts/demo.ps1` that spins up the compiled database, tests KV reads/writes, inserts documents, processes nested JSON queries, verifies system metrics, and stops the process:
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\demo.ps1
 ```
 
 ---
 
-# Phase 3 — Transactions & Concurrency (4 Weeks)
+## HTTP REST API Endpoints
 
-## Learn
+Secure your API server by passing an authorization token on startup (via flag `-token my-secret` or environment variable `ARORADB_TOKEN`). When enabled, all request calls must include the header `X-Arora-Token: <token>`.
 
-- ACID
-- MVCC
-- Snapshot Isolation
-- Serializable Isolation
-- Lock Manager
-- Deadlocks
-- Optimistic vs Pessimistic Locking
+### Key-Value Store
+* **`GET /api/kv`**: List all database keys. Returns `[{"Key":"welcome","Value":"hello"}]`.
+* **`GET /api/kv/{key}`**: Retrieve value. Returns `{"key":"key1","value":"val1"}`.
+* **`POST /api/kv/{key}`**: Save value. Body is raw bytes or text payload.
+* **`DELETE /api/kv/{key}`**: Delete key.
 
-### Read
+### Document Collections
+* **`GET /api/collections`**: List all unique collections.
+* **`GET /api/documents/{collection}`**: List all documents in a collection.
+* **`GET /api/documents/{collection}/{id}`**: Retrieve document.
+* **`POST /api/documents/{collection}`**: Insert/Update document. Body must be valid JSON. (Provide `?id=my-id` query param or write `_id` field inside JSON, otherwise an ID is auto-generated).
+* **`DELETE /api/documents/{collection}/{id}`**: Delete document.
+* **`POST /api/documents/{collection}/query`**: Search documents. Body is a JSON filter (supports nested paths, e.g., `{"profile.role": "admin"}`).
 
-- PostgreSQL MVCC
-- DDIA Transactions
-
-## Build
-
-- MVCC
-- Version Chains
-- Lock Manager
-- Transaction Manager
-- Deadlock Detection
-- Snapshot Reads
-
-**Deliverable**
-
-```
-txn/
-├── mvcc.go
-├── lock_manager.go
-├── transaction.go
-└── snapshot.go
-```
+### Maintenance & Telemetry
+* **`GET /api/metrics`**: Returns database file metrics, operations/sec throughput rates, memory allocs, and keys count.
+* **`POST /api/admin/compact`**: Manually trigger log merging and directory cleaning.
 
 ---
 
-# Phase 4 — Indexing (2 Weeks)
+## Self-Hosting
 
-## Learn
-
-- B+ Trees
-- Hash Indexes
-- Secondary Indexes
-- Covering Indexes
-
-### Build
-
-- B+ Tree
-- Hash Index
-- Composite Index
-- Secondary Indexes
-
----
-
-# Phase 5 — Query Engine (5 Weeks)
-
-## Learn
-
-- SQL Parsing
-- AST
-- Query Planning
-- Query Optimization
-- Execution Engine
-
-### Read
-
-- SQLite Parser
-- PostgreSQL Planner
-
-## Build
-
-```
-SQL
-↓
-
-Lexer
-↓
-
-Parser
-↓
-
-AST
-↓
-
-Logical Plan
-↓
-
-Optimizer
-↓
-
-Physical Plan
-↓
-
-Execution Engine
+### Docker Run
+Start the database server instantly with persistent storage:
+```bash
+docker build -t aroradb:latest .
+docker run -d -p 8080:8080 -v aroradb_data:/data -e ARORADB_TOKEN=my-secure-token aroradb:latest
 ```
 
-Support
-
-- CREATE TABLE
-- INSERT
-- UPDATE
-- DELETE
-- SELECT
-- WHERE
-- ORDER BY
-- GROUP BY
-- LIMIT
-
----
-
-# Phase 6 — Networking (2 Weeks)
-
-## Learn
-
-- TCP
-- Binary Protocols
-- Connection Pooling
-- Request Multiplexing
-
-### Build
-
-- TCP Server
-- Binary Wire Protocol
-- Client SDK
-- Connection Pool
-- Authentication
-
-Example
-
-```
-Client
-
-↓
-
-TCP
-
-↓
-
-Protocol
-
-↓
-
-Database
+### Docker Compose
+Modify properties inside `docker-compose.yml` and run:
+```bash
+docker-compose up -d
 ```
 
 ---
 
-# Phase 7 — Replication (4 Weeks)
+## Learning Roadmap: DoraDB Design Plan
 
-## Learn
+This repository is built following a structured 10-phase database internals engineering roadmap:
 
-- Raft
-- Consensus
-- Log Replication
-- Leader Election
-- Quorum Reads
-- Failover
+### Phase 0 — Foundations (2 Weeks)
+* **Topics**: Binary file formats, Page layout (4KB/8KB pages), Disk I/O, Serialization, Checksums, Cache locality.
+* **Build**: File Manager, Disk Manager, Page Manager, Binary Encoder/Decoder, CRC Validation.
 
-### Read
+### Phase 1 — Storage Engine (3 Weeks)
+* **Topics**: WAL, Crash Recovery, MemTables, SSTables, Immutable storage, Append-only design.
+* **Build**: WAL, MemTable, SSTable, Flush Mechanism, Recovery on Startup.
 
-- Raft Paper
-- etcd/raft Source
+### Phase 2 — LSM Tree (3 Weeks)
+* **Topics**: LSM Trees, Compaction, Bloom Filters, Skip Lists, Leveled vs Tiered Compaction.
+* **Build**: Multi-Level LSM Tree, Bloom Filters, Background Compaction, Manifest File.
 
-## Build
+### Phase 3 — Transactions & Concurrency (4 Weeks)
+* **Topics**: ACID, MVCC, Snapshot Isolation, Lock Manager, Deadlock Detection.
+* **Build**: MVCC, Version Chains, Lock Manager, Transaction Manager, Deadlock Detection.
 
-- Leader Election
-- Followers
-- WAL Replication
-- Heartbeats
-- Snapshot Replication
-- Automatic Failover
+### Phase 4 — Indexing (2 Weeks)
+* **Topics**: B+ Trees, Hash Indexes, Secondary Indexes, Covering Indexes.
+* **Build**: B+ Tree, Hash Index, Composite Index, Secondary Indexes.
 
----
+### Phase 5 — Query Engine (5 Weeks)
+* **Topics**: SQL Parsing, AST, Query Planning, Query Optimization, Execution Engine.
+* **Build**: Lexer -> Parser -> AST -> Logical Plan -> Optimizer -> Physical Plan -> Execution Engine.
 
-# Phase 8 — Distributed Database (5 Weeks)
+### Phase 6 — Query Wire Protocol (2 Weeks)
+* **Topics**: TCP, Binary protocols, Connection Pooling, Client SDK.
+* **Build**: TCP Server, Wire Protocol, Client SDK.
 
-## Learn
+### Phase 7 — Replication (4 Weeks)
+* **Topics**: Raft Consensus, Log Replication, Leader Election, Failover.
+* **Build**: Leader Election, WAL Replication, Heartbeats, Failover.
 
-- Consistent Hashing
-- Sharding
-- Cluster Membership
-- Rebalancing
-- Distributed Transactions
-- Two-Phase Commit
+### Phase 8 — Distributed Database (5 Weeks)
+* **Topics**: Consistent Hashing, Sharding, Two-Phase Commit.
+* **Build**: Multi-node cluster, Sharding, Distributed Query Routing.
 
-## Build
+### Phase 9 — Performance Engineering (Ongoing)
+* **Topics**: SIMD, Cache locality, Zero-copy, Vectorized execution.
+* **Build**: Vectorized Execution, Async I/O, Compression.
 
-- Multi-node Cluster
-- Sharding
-- Cluster Metadata
-- Data Migration
-- Rebalancing
-- Distributed Query Routing
-
----
-
-# Phase 9 — Performance Engineering (Ongoing)
-
-## Learn
-
-- SIMD
-- Cache Locality
-- Branch Prediction
-- Memory Pools
-- Arena Allocation
-- Zero-copy
-- mmap
-- io_uring
-- Lock-free Data Structures
-
-## Build
-
-- Parallel Query Execution
-- Compression
-- Vectorized Execution
-- Adaptive Caching
-- Async I/O
-
-Benchmark Against
-
-- SQLite
-- RocksDB
-- BadgerDB
-- Pebble
-
----
-
-# Phase 10 — Observability
-
-## Build
-
-- Metrics
-- Prometheus Exporter
-- pprof
-- Tracing
-- Structured Logging
-- Slow Query Log
-- Dashboard
-
----
-
-# Long-Term Goals
-
-- Distributed SQL
-- Cost-Based Query Optimizer
-- Columnar Storage Engine
-- Vectorized Execution Engine
-- Time-Series Storage
-- Full-Text Search
-- Vector Indexes (HNSW)
-- Cloud Native Deployment
-- Kubernetes Operator
-- HTTP API
-- CLI
-- Web Dashboard
-
----
-
-# Repository Structure
-
-```
-doradb/
-
-cmd/
-internal/
-    storage/
-    wal/
-    page/
-    buffer/
-    lsm/
-    txn/
-    index/
-    parser/
-    planner/
-    optimizer/
-    executor/
-    network/
-    raft/
-    cluster/
-    metrics/
-
-benchmarks/
-docs/
-examples/
-scripts/
-tests/
-```
-
----
-
-# Design Documents
-
-Every major feature must have a design document before implementation.
-
-```
-docs/
-
-0001-storage-engine.md
-0002-page-format.md
-0003-wal.md
-0004-lsm-tree.md
-0005-compaction.md
-0006-bloom-filters.md
-0007-mvcc.md
-0008-indexes.md
-0009-query-engine.md
-0010-network-protocol.md
-0011-raft.md
-0012-sharding.md
-0013-performance.md
-architecture.md
-```
-
----
-
-# Core Principles
-
-- Build from first principles.
-- Prioritize correctness before optimization.
-- Benchmark every major change.
-- Keep components modular and independently testable.
-- Write design docs before writing code.
-- Measure performance; don't assume it.
-- Learn from production systems, but implement independently.
-
----
-
-# Technologies
-
-- **Language:** Go
-- **Protocol:** Custom Binary Protocol
-- **Storage Engine:** LSM Tree
-- **Consensus:** Raft
-- **Indexes:** B+ Tree + Bloom Filters
-- **Transactions:** MVCC
-- **Testing:** Go Test + Benchmarks
-- **Observability:** Prometheus + pprof
-
----
-
-# Inspiration
-
-- PostgreSQL
-- SQLite
-- RocksDB
-- Pebble
-- CockroachDB
-- TiDB
-- FoundationDB
-- ClickHouse
-- DuckDB
-- etcd
-- BadgerDB
+### Phase 10 — Observability
+* **Topics**: Metrics, Prometheus Exporter, Slow query logs, Dashboard.
+* **Build**: Structured Logging, Exporter, Dashboard.
