@@ -13,6 +13,7 @@ import (
 	"github.com/BhawukHQ/Bhawuk-AroraDB/internal/config"
 	"github.com/BhawukHQ/Bhawuk-AroraDB/internal/document"
 	"github.com/BhawukHQ/Bhawuk-AroraDB/internal/engine"
+	"github.com/BhawukHQ/Bhawuk-AroraDB/internal/logs"
 	"github.com/BhawukHQ/Bhawuk-AroraDB/internal/metrics"
 )
 
@@ -57,7 +58,10 @@ func (s *Server) Start() error {
 
 	// System API
 	mux.HandleFunc("GET /api/metrics", s.handleMetrics)
+	mux.HandleFunc("GET /api/logs", s.handleGetLogs)
 	mux.HandleFunc("POST /api/admin/compact", s.handleCompact)
+	mux.HandleFunc("GET /api/admin/backup", s.handleBackup)
+	mux.HandleFunc("POST /api/admin/restore", s.handleRestore)
 	mux.HandleFunc("GET /health", s.handleHealth)
 
 	// Serve Static Files from embedded web UI
@@ -365,6 +369,68 @@ func (s *Server) handleCompact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sendJSON(w, http.StatusOK, map[string]interface{}{"success": true, "message": "compaction completed successfully"})
+}
+
+func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
+	sendJSON(w, http.StatusOK, logs.GetBuffer().GetEntries())
+}
+
+func (s *Server) handleBackup(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", `attachment; filename="aroradb-backup.zip"`)
+	
+	err := CreateBackupZip(s.cfg.DBDir, w)
+	if err != nil {
+		log.Printf("ERROR: database backup creation failed: %v", err)
+	}
+}
+
+func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
+	log.Println("Initiating database hot restore...")
+	
+	err := r.ParseMultipartForm(20 * 1024 * 1024) // 20MB max
+	if err != nil {
+		sendError(w, http.StatusBadRequest, "failed to parse multipart form")
+		return
+	}
+
+	file, _, err := r.FormFile("backup")
+	if err != nil {
+		sendError(w, http.StatusBadRequest, "missing backup file in request payload")
+		return
+	}
+	defer file.Close()
+
+	log.Println("Closing database storage engine for restore...")
+	if err := s.db.Close(); err != nil {
+		sendError(w, http.StatusInternalServerError, fmt.Sprintf("failed to close database engine: %v", err))
+		return
+	}
+
+	log.Println("Unzipping restored database files...")
+	if err := RestoreBackupZip(s.cfg.DBDir, file); err != nil {
+		// attempt rollback reopen
+		dbEngine, _ := engine.NewEngine(s.cfg.DBDir, s.cfg.MaxFileSize)
+		if dbEngine != nil {
+			s.db = dbEngine
+			s.cm = document.NewCollectionManager(s.db)
+		}
+		sendError(w, http.StatusInternalServerError, fmt.Sprintf("failed to restore archive contents: %v", err))
+		return
+	}
+
+	log.Println("Re-initializing storage engine index...")
+	dbEngine, err := engine.NewEngine(s.cfg.DBDir, s.cfg.MaxFileSize)
+	if err != nil {
+		sendError(w, http.StatusInternalServerError, fmt.Sprintf("failed to hot-reload storage index: %v", err))
+		return
+	}
+
+	s.db = dbEngine
+	s.cm = document.NewCollectionManager(s.db)
+
+	log.Println("Database hot restore completed successfully!")
+	sendJSON(w, http.StatusOK, map[string]interface{}{"success": true, "message": "database state restored successfully"})
 }
 
 // Helpers
