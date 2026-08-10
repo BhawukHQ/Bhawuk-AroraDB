@@ -522,119 +522,33 @@ tr.selected-row td {
   gap: 0.5rem;
 }
 
-/* Console Layout */
-.console-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1.5rem;
+/* SQL Workspace Layout styling (NEW in v3.0) */
+.sql-workspace-split {
+  align-items: stretch;
 }
 
-@media (max-width: 900px) {
-  .console-grid {
-    grid-template-columns: 1fr;
-  }
+.table-schema-card {
+  transition: background var(--transition-speed), border-color var(--transition-speed);
 }
 
-.form-group {
-  margin-bottom: 1.25rem;
+.table-schema-card:hover {
+  background: rgba(255, 255, 255, 0.03) !important;
+  border-color: rgba(255, 255, 255, 0.15) !important;
 }
 
-.form-group label {
-  display: block;
-  font-size: 0.85rem;
-  color: var(--text-secondary);
-  font-weight: 500;
-  margin-bottom: 0.5rem;
+.table-cols-list {
+  animation: cols-fade-in 0.2s ease forwards;
 }
 
-.input-group {
-  display: flex;
+@keyframes cols-fade-in {
+  from { opacity: 0; transform: translateY(-5px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
-.input-group select {
-  padding: 0.65rem 0.85rem;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--border-glow);
-  border-right: none;
-  border-top-left-radius: 8px;
-  border-bottom-left-radius: 8px;
-  color: var(--text-primary);
-  font-weight: 600;
-  outline: none;
-}
-
-.input-group input {
-  flex-grow: 1;
-  padding: 0.65rem 1rem;
-  background: rgba(255, 255, 255, 0.01);
-  border: 1px solid var(--border-glow);
-  border-top-right-radius: 8px;
-  border-bottom-right-radius: 8px;
-  color: var(--text-primary);
-  font-family: var(--font-mono);
-  outline: none;
-}
-
-.input-group input:focus {
-  border-color: var(--border-focus);
-}
-
-textarea {
-  width: 100%;
-  padding: 1rem;
-  background: rgba(0, 0, 0, 0.2);
-  border: 1px solid var(--border-glow);
-  border-radius: 8px;
-  color: var(--text-primary);
-  outline: none;
-  resize: vertical;
-}
-
-textarea:focus {
-  border-color: var(--border-focus);
-}
-
-.console-output-panel {
-  display: flex;
-  flex-direction: column;
-}
-
-.console-output-panel .panel-body {
-  flex-grow: 1;
-  min-height: 350px;
-  position: relative;
-  background: #040507;
-}
-
-.console-output {
-  position: absolute;
-  top: 0; left: 0; right: 0; bottom: 0;
-  margin: 0;
-  padding: 1.5rem;
-  overflow-y: auto;
-  color: #92ffaa;
-  font-size: 0.85rem;
-  line-height: 1.5;
-  white-space: pre-wrap;
-}
-
-.status-badge {
-  font-size: 0.75rem;
-  font-family: var(--font-mono);
-  padding: 0.25rem 0.5rem;
+.sql-error-box {
+  background: rgba(255, 85, 85, 0.06);
+  border-left: 4px solid #ff5555;
   border-radius: 4px;
-  font-weight: 600;
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.status-badge.status-200 { background: rgba(46, 196, 182, 0.15); color: var(--color-green); }
-.status-badge.status-404 { background: rgba(255, 51, 102, 0.15); color: var(--color-red); }
-.status-badge.status-500 { background: rgba(255, 51, 102, 0.15); color: var(--color-red); }
-
-.time-badge {
-  font-size: 0.75rem;
-  font-family: var(--font-mono);
-  color: var(--text-muted);
 }
 
 /* API Integration Docs */

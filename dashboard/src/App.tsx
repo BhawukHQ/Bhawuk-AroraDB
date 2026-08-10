@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { 
-  Activity, Database, FileCode, Terminal, BookOpen, Key, 
+  Activity, Database, FileCode, BookOpen, Key, 
   RefreshCw, Plus, Trash2, Edit, Search, 
   Folder, Play, ChevronRight, X, Clipboard, CheckCircle,
-  Download, Upload, AlignLeft, Sliders, Server, Info
+  Download, Upload, AlignLeft, Sliders, Server, Info,
+  Table, Cpu, Shield, ShieldCheck, Lock
 } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, Area, Tooltip, XAxis } from 'recharts';
 import './App.css';
@@ -56,11 +57,35 @@ interface QueryRule {
   value: string;
 }
 
+interface ColumnDefinition {
+  name: string;
+  type: string;
+}
+
+interface SchemaInfo {
+  table_name: string;
+  columns: ColumnDefinition[];
+  row_count: number;
+}
+
+interface SQLResult {
+  columns: string[];
+  rows: any[][];
+  message: string;
+}
+
+// Roles definition
+type UserRole = 'admin_proj' | 'admin_db' | 'user_db' | 'visitor';
+
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'overview' | 'kv' | 'docs' | 'console' | 'api-docs' | 'logs'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'kv' | 'docs' | 'sql' | 'logs' | 'api-docs'>('overview');
   const [token, setToken] = useState(localStorage.getItem('arora_token') || '');
   const [tokenInput, setTokenInput] = useState(token);
   const [isConnected, setIsConnected] = useState(true);
+
+  // RBAC Roles Engine
+  const [userRole, setUserRole] = useState<UserRole>('admin_proj');
+  const [showPrivacyModal, setShowPrivacyModal] = useState<boolean>(false);
 
   // Telemetry Telemetry
   const [metrics, setMetrics] = useState<TelemetryMetrics | null>(null);
@@ -76,9 +101,7 @@ export default function App() {
   const [showKVModal, setShowKVModal] = useState(false);
   const [kvEditKey, setKvEditKey] = useState('');
   const [kvEditVal, setKvEditVal] = useState('');
-  const [selectedKV, setSelectedKV] = useState<KeyVal | null>(null); // for sliding side-sheet
-  
-  // KV Pagination
+  const [selectedKV, setSelectedKV] = useState<KeyVal | null>(null);
   const [kvPage, setKvPage] = useState(1);
   const kvPageSize = 10;
 
@@ -98,19 +121,19 @@ export default function App() {
   const [qbOp, setQbOp] = useState('$eq');
   const [qbVal, setQbVal] = useState('');
 
+  // SQL Engine State
+  const [sqlQuery, setSqlQuery] = useState<string>('SELECT * FROM users;');
+  const [sqlResult, setSqlResult] = useState<SQLResult | null>(null);
+  const [sqlTables, setSqlTables] = useState<SchemaInfo[]>([]);
+  const [expandedTable, setExpandedTable] = useState<string | null>(null);
+  const [loadingSQL, setLoadingSQL] = useState<boolean>(false);
+  const [sqlError, setSqlError] = useState<string>('');
+
   // Logs Explorer
   const [sysLogs, setSysLogs] = useState<LogEntry[]>([]);
   const [logsSearch, setLogsSearch] = useState('');
   const [logsLevel, setLogsLevel] = useState<'ALL' | 'HTTP' | 'SYSTEM' | 'ERROR'>('ALL');
   const [autoScrollLogs, setAutoScrollLogs] = useState(true);
-
-  // Console
-  const [consoleMethod, setConsoleMethod] = useState<'GET' | 'POST' | 'DELETE'>('GET');
-  const [consolePath, setConsolePath] = useState('/api/kv/test_key');
-  const [consoleBody, setConsoleBody] = useState('{\n  "value": "sample payload"\n}');
-  const [consoleStatus, setConsoleStatus] = useState<string>('Idle');
-  const [consoleTime, setConsoleTime] = useState<string>('-- ms');
-  const [consoleResponse, setConsoleResponse] = useState<string>('Waiting for execution...');
 
   // Dev Integration
   const [codeLang, setCodeLang] = useState<'curl' | 'js' | 'python'>('curl');
@@ -179,7 +202,7 @@ export default function App() {
     };
 
     const getLogs = async () => {
-      if (activeTab !== 'logs') return;
+      if (activeTab !== 'logs' || userRole !== 'admin_proj') return;
       try {
         const res = await aroraFetch('/api/logs');
         if (res.ok) {
@@ -202,7 +225,7 @@ export default function App() {
       clearInterval(metricsInterval);
       clearInterval(logsInterval);
     };
-  }, [token, metricsTimeframe, activeTab]);
+  }, [token, metricsTimeframe, activeTab, userRole]);
 
   // Load tabs-specific data
   useEffect(() => {
@@ -210,19 +233,32 @@ export default function App() {
       loadKVData();
     } else if (activeTab === 'docs') {
       loadCollections();
+    } else if (activeTab === 'sql') {
+      loadSQLTables();
     }
   }, [activeTab, token]);
 
+  // Ensure role tab restrictions
+  useEffect(() => {
+    if (userRole === 'visitor' && activeTab !== 'overview') {
+      setActiveTab('overview');
+    } else if (userRole === 'user_db' && activeTab === 'logs') {
+      setActiveTab('overview');
+    } else if (userRole === 'admin_db' && activeTab === 'logs') {
+      setActiveTab('overview');
+    }
+  }, [userRole]);
+
   // KV operations
   const loadKVData = async () => {
+    if (userRole === 'visitor') return;
     setLoadingKV(true);
     try {
       const res = await aroraFetch(`/api/kv?prefix=${encodeURIComponent(kvSearch)}`);
       if (res.ok) {
         const data: KeyVal[] = await res.json();
-        // Filter out JSON docs so only raw KVs remain in KV browser
-        setKvData(data ? data.filter(item => !item.Key.startsWith('doc:')) : []);
-        setKvPage(1); // reset to page 1
+        setKvData(data ? data.filter(item => !item.Key.startsWith('doc:') && !item.Key.startsWith('sql:')) : []);
+        setKvPage(1);
       }
     } catch (err) {
       addNotification('Failed to retrieve KV records.', 'error');
@@ -231,7 +267,6 @@ export default function App() {
     }
   };
 
-  // Trigger search on debounce/delay
   useEffect(() => {
     if (activeTab === 'kv') {
       const timer = setTimeout(loadKVData, 300);
@@ -240,6 +275,10 @@ export default function App() {
   }, [kvSearch]);
 
   const saveKV = async () => {
+    if (userRole === 'user_db' || userRole === 'visitor') {
+      addNotification('Permission Denied: Database users cannot write keys.', 'error');
+      return;
+    }
     if (!kvEditKey.trim()) {
       addNotification('Key name cannot be blank', 'warning');
       return;
@@ -264,6 +303,10 @@ export default function App() {
   };
 
   const deleteKV = async (key: string) => {
+    if (userRole === 'user_db' || userRole === 'visitor') {
+      addNotification('Permission Denied: Database users cannot delete keys.', 'error');
+      return;
+    }
     if (!confirm(`Are you sure you want to delete key "${key}"?`)) return;
     try {
       const res = await aroraFetch(`/api/kv/${encodeURIComponent(key)}`, { method: 'DELETE' });
@@ -279,6 +322,7 @@ export default function App() {
 
   // Document operations
   const loadCollections = async () => {
+    if (userRole === 'visitor') return;
     try {
       const res = await aroraFetch('/api/collections');
       if (res.ok) {
@@ -294,7 +338,7 @@ export default function App() {
   };
 
   const fetchDocuments = async () => {
-    if (!activeCollection) return;
+    if (!activeCollection || userRole === 'visitor') return;
     setLoadingDocs(true);
     try {
       let res;
@@ -331,6 +375,10 @@ export default function App() {
   }, [activeCollection]);
 
   const saveDocument = async () => {
+    if (userRole === 'user_db' || userRole === 'visitor') {
+      addNotification('Permission Denied: Database users cannot write documents.', 'error');
+      return;
+    }
     try {
       JSON.parse(docEditJson);
     } catch (e) {
@@ -357,6 +405,10 @@ export default function App() {
   };
 
   const deleteDoc = async (id: string) => {
+    if (userRole === 'user_db' || userRole === 'visitor') {
+      addNotification('Permission Denied: Database users cannot delete documents.', 'error');
+      return;
+    }
     if (!confirm(`Are you sure you want to delete document "${id}"?`)) return;
     try {
       const res = await aroraFetch(`/api/documents/${activeCollection}/${encodeURIComponent(id)}`, {
@@ -372,11 +424,15 @@ export default function App() {
   };
 
   const createCollection = () => {
+    if (userRole === 'user_db' || userRole === 'visitor') {
+      addNotification('Permission Denied: Database users cannot create collections.', 'error');
+      return;
+    }
     const colName = prompt('Enter new collection name:');
     if (!colName) return;
     const cleanColName = colName.trim().replace(/[^a-zA-Z0-9_-]/g, '');
     if (!cleanColName) {
-      addNotification('Invalid collection name (only alphanumeric, dashes, and underscores).', 'error');
+      addNotification('Invalid collection name.', 'error');
       return;
     }
     setActiveCollection(cleanColName);
@@ -388,8 +444,67 @@ export default function App() {
     });
   };
 
+  // SQL Operations
+  const loadSQLTables = async () => {
+    if (userRole === 'visitor') return;
+    try {
+      const res = await aroraFetch('/api/sql/tables');
+      if (res.ok) {
+        const data: SchemaInfo[] = await res.json();
+        setSqlTables(data || []);
+      }
+    } catch (err) {
+      addNotification('Failed to retrieve SQL metadata.', 'error');
+    }
+  };
+
+  const runSQLQuery = async () => {
+    if (!sqlQuery.trim()) {
+      addNotification('SQL query string cannot be empty.', 'warning');
+      return;
+    }
+    
+    // RBAC: Check SQL command type
+    const queryUpper = sqlQuery.trim().toUpperCase();
+    if (userRole === 'user_db') {
+      if (queryUpper.startsWith('CREATE') || queryUpper.startsWith('INSERT')) {
+        setSqlError('Permission Denied: Database users are restricted to read-only queries (SELECT).');
+        addNotification('Restricted query access blocked.', 'error');
+        return;
+      }
+    }
+
+    setLoadingSQL(true);
+    setSqlError('');
+    setSqlResult(null);
+
+    try {
+      const res = await aroraFetch('/api/sql', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: sqlQuery })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSqlResult(data);
+        addNotification('SQL execution finished.', 'success');
+        loadSQLTables();
+      } else {
+        setSqlError(data.error || 'SQL execution failed.');
+      }
+    } catch (err: any) {
+      setSqlError('Failed to communicate with SQL engine: ' + err.message);
+    } finally {
+      setLoadingSQL(false);
+    }
+  };
+
   // Compaction
   const runCompaction = async () => {
+    if (userRole !== 'admin_proj') {
+      addNotification('Permission Denied: Project Admins only.', 'error');
+      return;
+    }
     setIsCompacting(true);
     try {
       const res = await aroraFetch('/api/admin/compact', { method: 'POST' });
@@ -405,6 +520,10 @@ export default function App() {
 
   // Backup & Restore
   const triggerBackup = () => {
+    if (userRole !== 'admin_proj') {
+      addNotification('Permission Denied: Project Admins only.', 'error');
+      return;
+    }
     const url = `/api/admin/backup${token ? `?token=${encodeURIComponent(token)}` : ''}`;
     window.location.href = url;
     addNotification('Downloading database backup archive...', 'success');
@@ -412,6 +531,10 @@ export default function App() {
 
   const handleRestoreSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (userRole !== 'admin_proj') {
+      addNotification('Permission Denied: Project Admins only.', 'error');
+      return;
+    }
     if (!restoreFile) {
       addNotification('Please select a backup zip file first.', 'warning');
       return;
@@ -438,9 +561,9 @@ export default function App() {
       if (res.ok) {
         addNotification('Database restore complete! Hot-reload loaded successfully.', 'success');
         setRestoreFile(null);
-        // refresh views
         if (activeTab === 'kv') loadKVData();
         else if (activeTab === 'docs') loadCollections();
+        else if (activeTab === 'sql') loadSQLTables();
       } else {
         const data = await res.json();
         addNotification(data.error || 'Restore failed.', 'error');
@@ -449,42 +572,6 @@ export default function App() {
       addNotification('Failed to upload and restore backup.', 'error');
     } finally {
       setIsRestoring(false);
-    }
-  };
-
-  // Execute console command
-  const runConsoleQuery = async () => {
-    setConsoleStatus('Running...');
-    setConsoleTime('...');
-    setConsoleResponse('Executing query...');
-
-    const start = performance.now();
-    try {
-      const options: RequestInit = { method: consoleMethod };
-      if (consoleMethod !== 'GET' && consoleBody.trim()) {
-        options.body = consoleBody;
-        if (consoleBody.trim().startsWith('{') || consoleBody.trim().startsWith('[')) {
-          options.headers = { 'Content-Type': 'application/json' };
-        }
-      }
-
-      const res = await aroraFetch(consolePath, options);
-      const elapsed = (performance.now() - start).toFixed(1);
-      setConsoleTime(`${elapsed} ms`);
-      setConsoleStatus(`HTTP ${res.status}`);
-
-      const text = await res.text();
-      try {
-        const jsonVal = JSON.parse(text);
-        setConsoleResponse(JSON.stringify(jsonVal, null, 2));
-      } catch {
-        setConsoleResponse(text || '(Empty Response)');
-      }
-    } catch (err: any) {
-      const elapsed = (performance.now() - start).toFixed(1);
-      setConsoleTime(`${elapsed} ms`);
-      setConsoleStatus('NET ERROR');
-      setConsoleResponse(`Failed to establish connection to server:\n${err.message}`);
     }
   };
 
@@ -507,10 +594,7 @@ export default function App() {
     }
     const newRule: QueryRule = { field: qbField, op: qbOp, value: qbVal };
     setQbRules(prev => [...prev, newRule]);
-    
-    // Compile and set text query
     compileRulesToQuery([...qbRules, newRule]);
-    
     setQbField('');
     setQbVal('');
   };
@@ -528,13 +612,11 @@ export default function App() {
     }
     const filterObj: Record<string, any> = {};
     rules.forEach(rule => {
-      // Parse query value to type (int, float, boolean, string)
       let parsedVal: any = rule.value;
       if (rule.value === 'true') parsedVal = true;
       else if (rule.value === 'false') parsedVal = false;
       else if (!isNaN(Number(rule.value)) && rule.value.trim() !== '') parsedVal = Number(rule.value);
       else if (rule.value.startsWith('[') && rule.value.endsWith(']')) {
-        // Parse array format (e.g. ["admin", "user"])
         try {
           parsedVal = JSON.parse(rule.value);
         } catch {
@@ -564,43 +646,29 @@ export default function App() {
     const tokenHeaderJS = token ? `, 'X-Arora-Token': '${token}'` : '';
 
     if (codeLang === 'curl') {
-      return `# Store key value
-curl -X POST ${host}/api/kv/my_key${tokenHeader} -d "sample value"
+      return `# Execute SQL statement
+curl -X POST ${host}/api/sql${tokenHeader} \\
+  -H "Content-Type: application/json" \\
+  -d '{"query": "SELECT * FROM users WHERE age > 25"}'
 
-# Fetch key value
-curl ${host}/api/kv/my_key${tokenHeader}
+# Fetch database metrics
+curl ${host}/api/metrics${tokenHeader}
 
 # Save Document to Collection
 curl -X POST ${host}/api/documents/users${tokenHeader} \\
   -H "Content-Type: application/json" \\
-  -d '{"name": "Alice", "role": "admin"}'
-
-# Query Documents
-curl -X POST ${host}/api/documents/users/query${tokenHeader} \\
-  -H "Content-Type: application/json" \\
-  -d '{"role": "admin"}'`;
+  -d '{"name": "Alice", "role": "admin"}'`;
     }
 
     if (codeLang === 'js') {
-      return `// JS KV Fetch
-async function saveKV() {
-  const res = await fetch('${host}/api/kv/my_key', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'text/plain'${tokenHeaderJS}
-    },
-    body: 'sample value'
-  });
-  console.log(await res.json());
-}
-
-async function queryDocs() {
-  const res = await fetch('${host}/api/documents/users/query', {
+      return `// JS SQL Query
+async function querySQL() {
+  const res = await fetch('${host}/api/sql', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'${tokenHeaderJS}
     },
-    body: JSON.stringify({ role: 'admin' })
+    body: JSON.stringify({ query: 'SELECT * FROM users WHERE age > 25' })
   });
   console.log(await res.json());
 }`;
@@ -612,13 +680,9 @@ async function queryDocs() {
 headers = {}
 ${token ? `headers['X-Arora-Token'] = '${token}'` : '# No authentication configured'}
 
-# Write KV
-res = requests.post('${host}/api/kv/my_key', data="sample value", headers=headers)
-print(res.json())
-
-# Query Documents
-query_payload = {"role": "admin"}
-res = requests.post('${host}/api/documents/users/query', json=query_payload, headers=headers)
+# Run SELECT Query
+payload = {"query": "SELECT * FROM users WHERE age > 25"}
+res = requests.post('${host}/api/sql', json=payload, headers=headers)
 print(res.json())`;
   };
 
@@ -649,7 +713,6 @@ print(res.json())`;
     return true;
   });
 
-  // KV Pagination helpers
   const totalKVPages = Math.ceil(kvData.length / kvPageSize) || 1;
   const paginatedKVData = kvData.slice((kvPage - 1) * kvPageSize, kvPage * kvPageSize);
 
@@ -672,11 +735,11 @@ print(res.json())`;
       <aside className="sidebar">
         <div className="logo-area">
           <div className="logo-icon">
-            <Database size={22} />
+            <Cpu size={22} />
           </div>
           <div className="logo-text">
             <h1>AroraDB</h1>
-            <span>v2.0.0</span>
+            <span>v3.0.0</span>
           </div>
         </div>
 
@@ -687,37 +750,57 @@ print(res.json())`;
           >
             <Activity size={18} /> Telemetry
           </button>
-          <button 
-            className={`nav-item ${activeTab === 'kv' ? 'active' : ''}`}
-            onClick={() => setActiveTab('kv')}
-          >
-            <Database size={18} /> KV Store
-          </button>
-          <button 
-            className={`nav-item ${activeTab === 'docs' ? 'active' : ''}`}
-            onClick={() => setActiveTab('docs')}
-          >
-            <FileCode size={18} /> Documents
-          </button>
-          <button 
-            className={`nav-item ${activeTab === 'console' ? 'active' : ''}`}
-            onClick={() => setActiveTab('console')}
-          >
-            <Terminal size={18} /> Console
-          </button>
-          <button 
-            className={`nav-item ${activeTab === 'logs' ? 'active' : ''}`}
-            onClick={() => setActiveTab('logs')}
-          >
-            <AlignLeft size={18} /> System Logs
-          </button>
-          <button 
-            className={`nav-item ${activeTab === 'api-docs' ? 'active' : ''}`}
-            onClick={() => setActiveTab('api-docs')}
-          >
-            <BookOpen size={18} /> Documentation
-          </button>
+          
+          {userRole !== 'visitor' && (
+            <>
+              <button 
+                className={`nav-item ${activeTab === 'kv' ? 'active' : ''}`}
+                onClick={() => setActiveTab('kv')}
+              >
+                <Database size={18} /> KV Store
+              </button>
+              <button 
+                className={`nav-item ${activeTab === 'docs' ? 'active' : ''}`}
+                onClick={() => setActiveTab('docs')}
+              >
+                <FileCode size={18} /> Documents
+              </button>
+              <button 
+                className={`nav-item ${activeTab === 'sql' ? 'active' : ''}`}
+                onClick={() => setActiveTab('sql')}
+              >
+                <Table size={18} /> SQL Workspace
+              </button>
+            </>
+          )}
+
+          {userRole === 'admin_proj' && (
+            <button 
+              className={`nav-item ${activeTab === 'logs' ? 'active' : ''}`}
+              onClick={() => setActiveTab('logs')}
+            >
+              <AlignLeft size={18} /> System Logs
+            </button>
+          )}
+          
+          {userRole !== 'visitor' && (
+            <button 
+              className={`nav-item ${activeTab === 'api-docs' ? 'active' : ''}`}
+              onClick={() => setActiveTab('api-docs')}
+            >
+              <BookOpen size={18} /> Documentation
+            </button>
+          )}
         </nav>
+
+        {/* Privacy Policy toggle */}
+        <button 
+          className="btn btn-secondary btn-sm mb-3 w-full"
+          onClick={() => setShowPrivacyModal(true)}
+          style={{ fontSize: '0.8rem', background: 'none', borderColor: 'rgba(255,255,255,0.05)' }}
+        >
+          <Lock size={12} style={{ marginRight: '4px' }} /> Privacy Policy
+        </button>
 
         <div className="connection-status">
           <div className={`status-indicator ${isConnected ? 'online' : 'offline'}`}></div>
@@ -735,16 +818,32 @@ print(res.json())`;
             {activeTab === 'overview' && 'System Telemetry & Telemetry'}
             {activeTab === 'kv' && 'Key-Value Store Browser'}
             {activeTab === 'docs' && 'Document Collection Explorer'}
-            {activeTab === 'console' && 'Interactive API Playground'}
+            {activeTab === 'sql' && 'SQL Database Workspace'}
             {activeTab === 'logs' && 'Real-time System Logs Console'}
             {activeTab === 'api-docs' && 'Database Integration Guides'}
           </h2>
-          <div className="auth-bar">
+          
+          <div className="auth-bar" style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+            {/* RBAC Role Switcher */}
+            <div className="role-switcher-wrapper" style={{ display: 'flex', alignItems: 'center', background: 'rgba(255,255,255,0.02)', padding: '0.35rem 0.65rem', borderRadius: '8px', border: '1px solid var(--border-glow)' }}>
+              <Shield size={14} style={{ color: 'var(--color-cyan)', marginRight: '6px' }} />
+              <select 
+                value={userRole} 
+                onChange={(e) => setUserRole(e.target.value as UserRole)}
+                style={{ background: 'none', border: 'none', color: '#fff', fontSize: '0.85rem', outline: 'none', cursor: 'pointer', fontWeight: 600 }}
+              >
+                <option value="admin_proj">Project Admin</option>
+                <option value="admin_db">DB Admin (DBA)</option>
+                <option value="user_db">Database User</option>
+                <option value="visitor">Project Visitor</option>
+              </select>
+            </div>
+
             <div className="token-input-wrapper">
               <Key size={14} />
               <input 
                 type="password" 
-                placeholder="Auth Token (if required)" 
+                placeholder="Auth Token" 
                 value={tokenInput} 
                 onChange={(e) => setTokenInput(e.target.value)} 
               />
@@ -795,7 +894,7 @@ print(res.json())`;
               </div>
             </div>
 
-            <div className="dashboard-grid">
+            <div className="dashboard-grid" style={{ gridTemplateColumns: (userRole === 'admin_proj' ? '2fr 1fr' : '1fr') }}>
               {/* Telemetry charts */}
               <div className="dashboard-panel">
                 <div className="panel-header">
@@ -849,67 +948,69 @@ print(res.json())`;
                 </div>
               </div>
 
-              {/* Maintenance & Backups */}
-              <div className="dashboard-panel">
-                <div className="panel-header">
-                  <h3>Operations & backups</h3>
-                </div>
-                <div className="panel-body">
-                  <div className="sys-info-list">
-                    <div className="info-row">
-                      <span>Compaction Ratio:</span>
-                      <strong>{metrics?.compaction_ratio.toFixed(3) ?? '1.000'}</strong>
-                    </div>
-                    <div className="info-row">
-                      <span>Goroutines:</span>
-                      <strong>{metrics?.system.num_goroutines ?? 0}</strong>
-                    </div>
+              {/* Maintenance & Backups (Project Admin Only) */}
+              {userRole === 'admin_proj' && (
+                <div className="dashboard-panel">
+                  <div className="panel-header">
+                    <h3>Operations & backups</h3>
                   </div>
-                  
-                  <div className="flex flex-column gap-3 mt-3">
-                    <button 
-                      className="btn btn-secondary w-full"
-                      onClick={triggerBackup}
-                    >
-                      <Download size={14} /> Download Backup
-                    </button>
+                  <div className="panel-body">
+                    <div className="sys-info-list">
+                      <div className="info-row">
+                        <span>Compaction Ratio:</span>
+                        <strong>{metrics?.compaction_ratio.toFixed(3) ?? '1.000'}</strong>
+                      </div>
+                      <div className="info-row">
+                        <span>Goroutines:</span>
+                        <strong>{metrics?.system.num_goroutines ?? 0}</strong>
+                      </div>
+                    </div>
                     
-                    <form onSubmit={handleRestoreSubmit} className="flex gap-2 align-center w-full">
-                      <input 
-                        type="file" 
-                        accept=".zip" 
-                        onChange={(e) => setRestoreFile(e.target.files?.[0] || null)}
-                        style={{ display: 'none' }}
-                        id="restore-file-upload"
-                      />
-                      <label htmlFor="restore-file-upload" className="btn btn-secondary flex-grow-1" style={{ cursor: 'pointer' }}>
-                        {restoreFile ? restoreFile.name : 'Select Zip Backup'}
-                      </label>
+                    <div className="flex flex-column gap-3 mt-3">
                       <button 
-                        type="submit" 
-                        className="btn btn-primary-outline"
-                        disabled={isRestoring}
+                        className="btn btn-secondary w-full"
+                        onClick={triggerBackup}
                       >
-                        {isRestoring ? <RefreshCw size={14} className="spinner" /> : <Upload size={14} />} Restore
+                        <Download size={14} /> Download Backup
                       </button>
-                    </form>
+                      
+                      <form onSubmit={handleRestoreSubmit} className="flex gap-2 align-center w-full">
+                        <input 
+                          type="file" 
+                          accept=".zip" 
+                          onChange={(e) => setRestoreFile(e.target.files?.[0] || null)}
+                          style={{ display: 'none' }}
+                          id="restore-file-upload"
+                        />
+                        <label htmlFor="restore-file-upload" className="btn btn-secondary flex-grow-1" style={{ cursor: 'pointer' }}>
+                          {restoreFile ? restoreFile.name : 'Select Zip Backup'}
+                        </label>
+                        <button 
+                          type="submit" 
+                          className="btn btn-primary-outline"
+                          disabled={isRestoring}
+                        >
+                          {isRestoring ? <RefreshCw size={14} className="spinner" /> : <Upload size={14} />} Restore
+                        </button>
+                      </form>
 
-                    <button 
-                      className="btn btn-glow-purple w-full"
-                      disabled={isCompacting}
-                      onClick={runCompaction}
-                    >
-                      {isCompacting ? <RefreshCw size={14} className="spinner" /> : <RefreshCw size={14} />} Compaction
-                    </button>
+                      <button 
+                        className="btn btn-glow-purple w-full"
+                        disabled={isCompacting}
+                        onClick={runCompaction}
+                      >
+                        {isCompacting ? <RefreshCw size={14} className="spinner" /> : <RefreshCw size={14} />} Compaction
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
             </div>
           </div>
         )}
 
         {/* VIEW: KV Store */}
-        {activeTab === 'kv' && (
+        {activeTab === 'kv' && userRole !== 'visitor' && (
           <div className="tab-content">
             <div className="kv-view-split" style={{ display: 'flex', gap: '1.5rem', height: '100%' }}>
               <div className="kv-main-panel" style={{ flexGrow: 1, minWidth: 0 }}>
@@ -924,13 +1025,16 @@ print(res.json())`;
                         onChange={(e) => setKvSearch(e.target.value)}
                       />
                     </div>
-                    <button className="btn btn-primary" onClick={() => {
-                      setKvEditKey('');
-                      setKvEditVal('');
-                      setShowKVModal(true);
-                    }}>
-                      <Plus size={16} /> Add Key
-                    </button>
+                    
+                    {(userRole === 'admin_proj' || userRole === 'admin_db') && (
+                      <button className="btn btn-primary" onClick={() => {
+                        setKvEditKey('');
+                        setKvEditVal('');
+                        setShowKVModal(true);
+                      }}>
+                        <Plus size={16} /> Add Key
+                      </button>
+                    )}
                   </div>
                   <div className="panel-body p-0">
                     <div className="table-container">
@@ -939,7 +1043,9 @@ print(res.json())`;
                           <tr>
                             <th>Key</th>
                             <th>Value Preview</th>
-                            <th style={{ width: '150px' }} className="text-right">Actions</th>
+                            {(userRole === 'admin_proj' || userRole === 'admin_db') && (
+                              <th style={{ width: '150px' }} className="text-right">Actions</th>
+                            )}
                           </tr>
                         </thead>
                         <tbody>
@@ -966,18 +1072,21 @@ print(res.json())`;
                               <td className="code-font text-muted">
                                 {item.Value.length > 50 ? item.Value.substring(0, 50) + '...' : item.Value}
                               </td>
-                              <td className="text-right" onClick={(e) => e.stopPropagation()}>
-                                <button className="btn-action btn-edit mr-2" onClick={() => {
-                                  setKvEditKey(item.Key);
-                                  setKvEditVal(item.Value);
-                                  setShowKVModal(true);
-                                }}>
-                                  <Edit size={14} />
-                                </button>
-                                <button className="btn-action btn-delete" onClick={() => deleteKV(item.Key)}>
-                                  <Trash2 size={14} />
-                                </button>
-                              </td>
+                              
+                              {(userRole === 'admin_proj' || userRole === 'admin_db') && (
+                                <td className="text-right" onClick={(e) => e.stopPropagation()}>
+                                  <button className="btn-action btn-edit mr-2" onClick={() => {
+                                    setKvEditKey(item.Key);
+                                    setKvEditVal(item.Value);
+                                    setShowKVModal(true);
+                                  }}>
+                                    <Edit size={14} />
+                                  </button>
+                                  <button className="btn-action btn-delete" onClick={() => deleteKV(item.Key)}>
+                                    <Trash2 size={14} />
+                                  </button>
+                                </td>
+                              )}
                             </tr>
                           ))}
                         </tbody>
@@ -1020,12 +1129,15 @@ print(res.json())`;
                         {selectedKV.Value}
                       </pre>
                     </div>
+                    
                     <div className="flex gap-2">
-                      <button className="btn btn-primary-outline w-full" onClick={() => {
-                        setKvEditKey(selectedKV.Key);
-                        setKvEditVal(selectedKV.Value);
-                        setShowKVModal(true);
-                      }}>Edit</button>
+                      {(userRole === 'admin_proj' || userRole === 'admin_db') && (
+                        <button className="btn btn-primary-outline w-full" onClick={() => {
+                          setKvEditKey(selectedKV.Key);
+                          setKvEditVal(selectedKV.Value);
+                          setShowKVModal(true);
+                        }}>Edit</button>
+                      )}
                       <button className="btn btn-secondary" onClick={() => {
                         navigator.clipboard.writeText(selectedKV.Value);
                         addNotification('Copied value to clipboard.', 'success');
@@ -1039,7 +1151,7 @@ print(res.json())`;
         )}
 
         {/* VIEW: Document Collections */}
-        {activeTab === 'docs' && (
+        {activeTab === 'docs' && userRole !== 'visitor' && (
           <div className="tab-content">
             <div className="doc-layout">
               {/* Collection list */}
@@ -1048,9 +1160,12 @@ print(res.json())`;
                   <h3>Collections</h3>
                 </div>
                 <div className="panel-body">
-                  <button className="btn btn-sm btn-primary-outline w-full mb-3" onClick={createCollection}>
-                    <Plus size={14} /> Create Collection
-                  </button>
+                  {(userRole === 'admin_proj' || userRole === 'admin_db') && (
+                    <button className="btn btn-sm btn-primary-outline w-full mb-3" onClick={createCollection}>
+                      <Plus size={14} /> Create Collection
+                    </button>
+                  )}
+                  
                   <div className="collections-list">
                     {collections.map(col => (
                       <button 
@@ -1069,7 +1184,7 @@ print(res.json())`;
               {/* Documents table */}
               <div className="doc-main" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
                 
-                {/* Advanced Query Builder (UX Enhancement) */}
+                {/* Advanced Query Builder */}
                 <div className="dashboard-panel m-0">
                   <div className="panel-header">
                     <h3><Sliders size={16} style={{ verticalAlign: 'middle', marginRight: '5px' }} /> MongoDB Query Builder</h3>
@@ -1132,18 +1247,22 @@ print(res.json())`;
                         onChange={(e) => setDocQuery(e.target.value)}
                       />
                     </div>
+                    
                     <div className="flex gap-2">
                       <button className="btn btn-secondary" onClick={fetchDocuments}>
                         <Play size={14} /> Query
                       </button>
-                      <button className="btn btn-primary" onClick={() => {
-                        if (!activeCollection) return;
-                        setDocEditId('');
-                        setDocEditJson(JSON.stringify({ name: 'New Document', active: true }, null, 2));
-                        setShowDocModal(true);
-                      }}>
-                        <Plus size={14} /> Add Doc
-                      </button>
+                      
+                      {(userRole === 'admin_proj' || userRole === 'admin_db') && (
+                        <button className="btn btn-primary" onClick={() => {
+                          if (!activeCollection) return;
+                          setDocEditId('');
+                          setDocEditJson(JSON.stringify({ name: 'New Document', active: true }, null, 2));
+                          setShowDocModal(true);
+                        }}>
+                          <Plus size={14} /> Add Doc
+                        </button>
+                      )}
                     </div>
                   </div>
                   <div className="panel-body p-0">
@@ -1151,9 +1270,11 @@ print(res.json())`;
                       <table>
                         <thead>
                           <tr>
-                             <th style={{ width: '200px' }}>ID</th>
-                             <th>Document Payload</th>
-                             <th style={{ width: '150px' }} className="text-right">Actions</th>
+                            <th style={{ width: '200px' }}>ID</th>
+                            <th>Document Payload</th>
+                            {(userRole === 'admin_proj' || userRole === 'admin_db') && (
+                              <th style={{ width: '150px' }} className="text-right">Actions</th>
+                            )}
                           </tr>
                         </thead>
                         <tbody>
@@ -1166,7 +1287,7 @@ print(res.json())`;
                           ) : documents.length === 0 ? (
                             <tr>
                               <td colSpan={3} className="text-center text-muted py-5">
-                                No matching documents. Select a collection or clear your query filter.
+                                No matching documents.
                               </td>
                             </tr>
                           ) : documents.map(doc => {
@@ -1177,18 +1298,21 @@ print(res.json())`;
                                 <td className="code-font text-muted">
                                   {JSON.stringify(doc).length > 80 ? JSON.stringify(doc).substring(0, 80) + '...' : JSON.stringify(doc)}
                                 </td>
-                                <td className="text-right">
-                                  <button className="btn-action btn-edit mr-2" onClick={() => {
-                                    setDocEditId(id);
-                                    setDocEditJson(JSON.stringify(doc, null, 2));
-                                    setShowDocModal(true);
-                                  }}>
-                                    <Edit size={14} />
-                                  </button>
-                                  <button className="btn-action btn-delete" onClick={() => deleteDoc(id)}>
-                                    <Trash2 size={14} />
-                                  </button>
-                                </td>
+                                
+                                {(userRole === 'admin_proj' || userRole === 'admin_db') && (
+                                  <td className="text-right">
+                                    <button className="btn-action btn-edit mr-2" onClick={() => {
+                                      setDocEditId(id);
+                                      setDocEditJson(JSON.stringify(doc, null, 2));
+                                      setShowDocModal(true);
+                                    }}>
+                                      <Edit size={14} />
+                                    </button>
+                                    <button className="btn-action btn-delete" onClick={() => deleteDoc(id)}>
+                                      <Trash2 size={14} />
+                                    </button>
+                                  </td>
+                                )}
                               </tr>
                             );
                           })}
@@ -1202,75 +1326,142 @@ print(res.json())`;
           </div>
         )}
 
-        {/* VIEW: Interactive API Console */}
-        {activeTab === 'console' && (
-          <div className="tab-content">
-            <div className="console-grid">
-              <div className="dashboard-panel">
+        {/* VIEW: SQL Workspace */}
+        {activeTab === 'sql' && userRole !== 'visitor' && (
+          <div className="tab-content" style={{ padding: '1.5rem', display: 'flex', flexGrow: 1 }}>
+            <div className="sql-workspace-split" style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: '1.5rem', width: '100%', height: '100%' }}>
+              
+              {/* Left Column: Schema browser */}
+              <div className="sql-schemas-sidebar dashboard-panel" style={{ height: '100%', display: 'flex', flexDirection: 'column', marginBottom: 0 }}>
                 <div className="panel-header">
-                  <h3>HTTP Request Builder</h3>
+                  <h3><Table size={16} /> SQL Tables</h3>
                 </div>
-                <div className="panel-body">
-                  <div className="form-group">
-                    <label>Method & Endpoint</label>
-                    <div className="input-group">
-                      <select 
-                        value={consoleMethod} 
-                        onChange={(e: any) => setConsoleMethod(e.target.value)}
-                      >
-                        <option value="GET">GET</option>
-                        <option value="POST">POST</option>
-                        <option value="DELETE">DELETE</option>
-                      </select>
-                      <input 
-                        type="text" 
-                        value={consolePath}
-                        onChange={(e) => setConsolePath(e.target.value)}
-                      />
+                <div className="panel-body" style={{ flexGrow: 1, overflowY: 'auto' }}>
+                  {sqlTables.length === 0 ? (
+                    <p className="text-muted text-center text-sm">No tables created yet.</p>
+                  ) : sqlTables.map(tbl => (
+                    <div key={tbl.table_name} className="table-schema-card" style={{
+                      marginBottom: '0.85rem', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-glow)',
+                      borderRadius: '8px', padding: '0.65rem 0.85rem', cursor: 'pointer'
+                    }} onClick={() => setExpandedTable(expandedTable === tbl.table_name ? null : tbl.table_name)}>
+                      <div className="flex justify-between align-center" style={{ marginBottom: '0.25rem' }}>
+                        <span className="code-font font-weight-bold" style={{ color: 'var(--color-purple)', fontSize: '0.9rem' }}>{tbl.table_name}</span>
+                        <span className="badge code-font text-xs" style={{ background: 'rgba(0,245,212,0.08)', color: 'var(--color-cyan)', padding: '0.1rem 0.35rem', borderRadius: '4px' }}>
+                          Rows: {tbl.row_count}
+                        </span>
+                      </div>
+                      
+                      {expandedTable === tbl.table_name && (
+                        <div className="table-cols-list" style={{ borderTop: '1px dashed rgba(255,255,255,0.05)', marginTop: '0.5rem', paddingTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                          {tbl.columns.map(col => (
+                            <div key={col.name} className="flex justify-between text-xs code-font text-muted">
+                              <span>{col.name}</span>
+                              <span style={{ color: 'var(--color-cyan)', fontSize: '0.75rem' }}>{col.type}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Right Column: SQL editor and result table */}
+              <div className="sql-editor-section" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', height: '100%', minWidth: 0 }}>
+                {/* Editor console */}
+                <div className="dashboard-panel" style={{ marginBottom: 0 }}>
+                  <div className="panel-header">
+                    <h3>SQL Query Editor {userRole === 'user_db' && <span className="text-xs text-muted">(Read-Only)</span>}</h3>
+                  </div>
+                  <div className="panel-body" style={{ padding: '1rem' }}>
+                    <textarea 
+                      rows={6}
+                      className="code-font"
+                      style={{ background: '#040507', border: '1px solid var(--border-glow)', color: '#a8ffb2', fontSize: '0.85rem', lineHeight: 1.6 }}
+                      value={sqlQuery}
+                      onChange={(e) => setSqlQuery(e.target.value)}
+                    />
+                    <div className="flex justify-between mt-3 align-center">
+                      <div className="flex gap-2">
+                        <button className="btn btn-secondary btn-sm" onClick={() => setSqlQuery('SELECT * FROM users;')}>SELECT Template</button>
+                        
+                        {(userRole === 'admin_proj' || userRole === 'admin_db') && (
+                          <>
+                            <button className="btn btn-secondary btn-sm" onClick={() => setSqlQuery('CREATE TABLE users (\n  id TEXT,\n  name TEXT,\n  age INT\n);')}>CREATE TABLE Template</button>
+                            <button className="btn btn-secondary btn-sm" onClick={() => setSqlQuery('INSERT INTO users VALUES (\'usr_10\', \'Alice\', 32);')}>INSERT Template</button>
+                          </>
+                        )}
+                      </div>
+                      <button className="btn btn-primary" onClick={runSQLQuery} disabled={loadingSQL}>
+                        {loadingSQL ? <RefreshCw size={14} className="spinner" /> : <Play size={14} />} Run Query
+                      </button>
                     </div>
                   </div>
+                </div>
 
-                  <div className="form-group">
-                    <label>JSON Body Payload (POST only)</label>
-                    <textarea 
-                      rows={8} 
-                      className="code-font"
-                      value={consoleBody}
-                      onChange={(e) => setConsoleBody(e.target.value)}
-                      disabled={consoleMethod === 'GET' || consoleMethod === 'DELETE'}
-                      style={{ opacity: (consoleMethod === 'GET' || consoleMethod === 'DELETE') ? 0.4 : 1 }}
-                    />
+                {/* Results Panel */}
+                <div className="dashboard-panel" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', marginBottom: 0, minHeight: '250px' }}>
+                  <div className="panel-header">
+                    <h3>Execution Result</h3>
                   </div>
-
-                  <button className="btn btn-primary w-full" onClick={runConsoleQuery}>
-                    <Terminal size={14} /> Send API Request
-                  </button>
+                  <div className="panel-body p-0" style={{ flexGrow: 1, overflowY: 'auto', background: '#030406', display: 'flex', flexDirection: 'column' }}>
+                    {sqlError && (
+                      <div className="sql-error-box code-font" style={{ color: '#ff5555', padding: '1.5rem', fontSize: '0.85rem', whiteSpace: 'pre-wrap' }}>
+                        <Lock size={16} style={{ verticalAlign: 'middle', marginRight: '5px' }} />
+                        {sqlError}
+                      </div>
+                    )}
+                    
+                    {sqlResult && !sqlError && (
+                      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                        {sqlResult.message && (
+                          <div className="code-font text-xs" style={{ color: 'var(--color-cyan)', padding: '0.85rem 1.5rem', borderBottom: '1px solid var(--border-glow)', background: 'rgba(0,245,212,0.02)' }}>
+                            {sqlResult.message}
+                          </div>
+                        )}
+                        
+                        {sqlResult.columns && sqlResult.columns.length > 0 && (
+                          <div className="table-container" style={{ flexGrow: 1 }}>
+                            <table>
+                              <thead>
+                                <tr>
+                                  {sqlResult.columns.map(col => (
+                                    <th key={col}>{col}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {sqlResult.rows && sqlResult.rows.map((row, rIdx) => (
+                                  <tr key={rIdx}>
+                                    {row.map((cell, cIdx) => (
+                                      <td key={cIdx} className="code-font text-muted">
+                                        {cell === null ? 'NULL' : typeof cell === 'boolean' ? String(cell) : String(cell)}
+                                      </td>
+                                    ))}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    
+                    {!sqlResult && !sqlError && (
+                      <div className="text-center text-muted py-5" style={{ margin: 'auto' }}>
+                        Type a query above and hit "Run Query" to see output.
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 
-              {/* Console Output */}
-              <div className="dashboard-panel console-output-panel">
-                <div className="panel-header">
-                  <h3>Response Payload</h3>
-                  <div className="flex gap-3 align-center">
-                    <span className={`status-badge ${consoleStatus.includes('200') ? 'status-200' : 'status-404'}`}>
-                      {consoleStatus}
-                    </span>
-                    <span className="time-badge">{consoleTime}</span>
-                  </div>
-                </div>
-                <div className="panel-body p-0">
-                  <pre className="console-output code-font">
-                    {consoleResponse}
-                  </pre>
-                </div>
-              </div>
             </div>
           </div>
         )}
 
         {/* VIEW: System Logs Explorer */}
-        {activeTab === 'logs' && (
+        {activeTab === 'logs' && userRole === 'admin_proj' && (
           <div className="tab-content">
             <div className="dashboard-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%', marginBottom: 0 }}>
               <div className="panel-header" style={{ flexWrap: 'wrap', gap: '1rem' }}>
@@ -1348,11 +1539,10 @@ print(res.json())`;
           </div>
         )}
 
-        {/* VIEW: API Docs & Hosting */}
-        {activeTab === 'api-docs' && (
+        {/* VIEW: API Docs */}
+        {activeTab === 'api-docs' && userRole !== 'visitor' && (
           <div className="tab-content">
             <div className="dashboard-grid">
-              {/* SDK Guides */}
               <div className="dashboard-panel">
                 <div className="panel-header">
                   <h3>Client Code Integration</h3>
@@ -1426,6 +1616,54 @@ WantedBy=multi-user.target`}
           </div>
         )}
       </main>
+
+      {/* PRIVACY POLICY MODAL (NEW in v3.0) */}
+      {showPrivacyModal && (
+        <div className="modal">
+          <div className="modal-content" style={{ width: '560px' }}>
+            <div className="modal-header">
+              <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <ShieldCheck size={20} style={{ color: 'var(--color-cyan)' }} /> AroraDB Privacy Policy
+              </h3>
+              <button className="btn-close-modal" onClick={() => setShowPrivacyModal(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="modal-body" style={{ fontSize: '0.9rem', lineHeight: 1.5, color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: '1rem', maxHeight: '420px', overflowY: 'auto' }}>
+              <div>
+                <strong style={{ color: '#fff' }}>1. Local-First Offline Guarantee</strong>
+                <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.85rem' }}>
+                  AroraDB runs 100% offline on your own local environment. No data records, logs, or metadata are ever transmitted to external cloud servers or metrics collectors. Your data is strictly yours.
+                </p>
+              </div>
+              
+              <div>
+                <strong style={{ color: '#fff' }}>2. API Security Authentication</strong>
+                <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.85rem' }}>
+                  When token protection is enabled (`--token` flag), API requests require a matching `X-Arora-Token` header. Auth tokens are held in-memory or in local client browser session storage and are never uploaded to any remote logging facility.
+                </p>
+              </div>
+
+              <div>
+                <strong style={{ color: '#fff' }}>3. Logging & Telemetry Retention</strong>
+                <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.85rem' }}>
+                  The real-time log viewer pulls from an in-memory ring buffer stored in RAM on your local machine. These buffer entries expire automatically and do not persist to disk, preventing logs leak.
+                </p>
+              </div>
+
+              <div>
+                <strong style={{ color: '#fff' }}>4. GDPR & HIPAA Regulatory Compliance</strong>
+                <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.85rem' }}>
+                  Since AroraDB doesn't act as a third-party data processor and processes all query pipelines locally, you retain full data custody, making it trivially simple to satisfy GDPR data subject requests and HIPAA strict safety guidelines.
+                </p>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-primary" onClick={() => setShowPrivacyModal(false)}>I Understand</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL: KV Creator */}
       {showKVModal && (
