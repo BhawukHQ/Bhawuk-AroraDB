@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { 
-  Activity, Database, FileCode, BookOpen, Key, 
+  Activity, Database, FileCode, BookOpen, 
   RefreshCw, Plus, Trash2, Edit, Search, 
   Folder, Play, ChevronRight, X, Clipboard, CheckCircle,
   Download, Upload, AlignLeft, Sliders, Server, Info,
-  Table, Cpu, Shield, ShieldCheck, Lock
+  Table, Cpu, Shield, ShieldCheck, Lock, LogOut, UserCheck, PlayCircle
 } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, Area, Tooltip, XAxis } from 'recharts';
 import './App.css';
@@ -37,6 +37,14 @@ interface KeyVal {
 interface LogEntry {
   timestamp: string;
   message: string;
+}
+
+interface AuditEntry {
+  timestamp: string;
+  action: string;
+  target: string;
+  user: string;
+  details: string;
 }
 
 interface ChartDataPoint {
@@ -74,17 +82,22 @@ interface SQLResult {
   message: string;
 }
 
-// Roles definition
 type UserRole = 'admin_proj' | 'admin_db' | 'user_db' | 'visitor';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'overview' | 'kv' | 'docs' | 'sql' | 'logs' | 'api-docs'>('overview');
+  
+  // Auth Session state
   const [token, setToken] = useState(localStorage.getItem('arora_token') || '');
-  const [tokenInput, setTokenInput] = useState(token);
-  const [isConnected, setIsConnected] = useState(true);
+  const [userRole, setUserRole] = useState<UserRole>((localStorage.getItem('arora_role') as UserRole) || 'visitor');
+  const [username, setUsername] = useState(localStorage.getItem('arora_username') || '');
+  
+  const [loginUser, setLoginUser] = useState('');
+  const [loginPass, setLoginPass] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [loadingLogin, setLoadingLogin] = useState(false);
 
-  // RBAC Roles Engine
-  const [userRole, setUserRole] = useState<UserRole>('admin_proj');
+  const [isConnected, setIsConnected] = useState(true);
   const [showPrivacyModal, setShowPrivacyModal] = useState<boolean>(false);
 
   // Telemetry Telemetry
@@ -125,7 +138,6 @@ export default function App() {
   const [sqlQuery, setSqlQuery] = useState<string>('SELECT * FROM users;');
   const [sqlResult, setSqlResult] = useState<SQLResult | null>(null);
   const [sqlTables, setSqlTables] = useState<SchemaInfo[]>([]);
-  const [expandedTable, setExpandedTable] = useState<string | null>(null);
   const [loadingSQL, setLoadingSQL] = useState<boolean>(false);
   const [sqlError, setSqlError] = useState<string>('');
 
@@ -134,6 +146,10 @@ export default function App() {
   const [logsSearch, setLogsSearch] = useState('');
   const [logsLevel, setLogsLevel] = useState<'ALL' | 'HTTP' | 'SYSTEM' | 'ERROR'>('ALL');
   const [autoScrollLogs, setAutoScrollLogs] = useState(true);
+
+  // Security Audit Log (NEW in v4.0)
+  const [auditLogs, setAuditLogs] = useState<AuditEntry[]>([]);
+  const [autoScrollAudit, setAutoScrollAudit] = useState(true);
 
   // Dev Integration
   const [codeLang, setCodeLang] = useState<'curl' | 'js' | 'python'>('curl');
@@ -156,7 +172,11 @@ export default function App() {
     try {
       const res = await fetch(path, options);
       if (res.status === 401) {
-        addNotification('Unauthorized request: invalid or missing API token', 'error');
+        // If session expired, auto logout
+        if (token) {
+          addNotification('Session expired. Please log in again.', 'error');
+          handleClientLogout();
+        }
         setIsConnected(false);
       } else {
         setIsConnected(true);
@@ -176,8 +196,10 @@ export default function App() {
     }, 4500);
   };
 
-  // Poll metrics and logs
+  // Poll metrics, logs, and audit logs
   useEffect(() => {
+    if (!token) return;
+
     const getMetrics = async () => {
       try {
         const res = await aroraFetch('/api/metrics');
@@ -185,7 +207,6 @@ export default function App() {
           const data: TelemetryMetrics = await res.json();
           setMetrics(data);
 
-          // Update chart data point
           setChartData(prev => {
             const next = [...prev];
             next.shift();
@@ -214,21 +235,38 @@ export default function App() {
       }
     };
 
+    const getAuditLogs = async () => {
+      if (activeTab !== 'overview' || userRole !== 'admin_proj') return;
+      try {
+        const res = await aroraFetch('/api/admin/audit');
+        if (res.ok) {
+          const data: AuditEntry[] = await res.json();
+          setAuditLogs(data || []);
+        }
+      } catch (err) {
+        // Silently catch
+      }
+    };
+
     getMetrics();
     getLogs();
+    getAuditLogs();
 
     const intervalVal = metricsTimeframe === '1m' ? 2000 : metricsTimeframe === '5m' ? 6000 : 18000;
     const metricsInterval = setInterval(getMetrics, intervalVal);
     const logsInterval = setInterval(getLogs, 2500);
+    const auditInterval = setInterval(getAuditLogs, 2500);
 
     return () => {
       clearInterval(metricsInterval);
       clearInterval(logsInterval);
+      clearInterval(auditInterval);
     };
   }, [token, metricsTimeframe, activeTab, userRole]);
 
   // Load tabs-specific data
   useEffect(() => {
+    if (!token) return;
     if (activeTab === 'kv') {
       loadKVData();
     } else if (activeTab === 'docs') {
@@ -237,17 +275,6 @@ export default function App() {
       loadSQLTables();
     }
   }, [activeTab, token]);
-
-  // Ensure role tab restrictions
-  useEffect(() => {
-    if (userRole === 'visitor' && activeTab !== 'overview') {
-      setActiveTab('overview');
-    } else if (userRole === 'user_db' && activeTab === 'logs') {
-      setActiveTab('overview');
-    } else if (userRole === 'admin_db' && activeTab === 'logs') {
-      setActiveTab('overview');
-    }
-  }, [userRole]);
 
   // KV operations
   const loadKVData = async () => {
@@ -458,22 +485,14 @@ export default function App() {
     }
   };
 
-  const runSQLQuery = async () => {
-    if (!sqlQuery.trim()) {
-      addNotification('SQL query string cannot be empty.', 'warning');
-      return;
-    }
-    
-    // RBAC: Check SQL command type
-    const queryUpper = sqlQuery.trim().toUpperCase();
-    if (userRole === 'user_db') {
-      if (queryUpper.startsWith('CREATE') || queryUpper.startsWith('INSERT')) {
-        setSqlError('Permission Denied: Database users are restricted to read-only queries (SELECT).');
-        addNotification('Restricted query access blocked.', 'error');
-        return;
-      }
-    }
+  // Visual SQL browser helper: Single click query execution
+  const viewSQLTableData = (tableName: string) => {
+    const query = `SELECT * FROM ${tableName};`;
+    setSqlQuery(query);
+    setSqlQueryAndRun(query);
+  };
 
+  const setSqlQueryAndRun = async (query: string) => {
     setLoadingSQL(true);
     setSqlError('');
     setSqlResult(null);
@@ -482,13 +501,11 @@ export default function App() {
       const res = await aroraFetch('/api/sql', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: sqlQuery })
+        body: JSON.stringify({ query })
       });
       const data = await res.json();
       if (res.ok) {
         setSqlResult(data);
-        addNotification('SQL execution finished.', 'success');
-        loadSQLTables();
       } else {
         setSqlError(data.error || 'SQL execution failed.');
       }
@@ -497,6 +514,72 @@ export default function App() {
     } finally {
       setLoadingSQL(false);
     }
+  };
+
+  const runSQLQuery = () => {
+    setSqlQueryAndRun(sqlQuery);
+  };
+
+  // Session Authentication triggers
+  const handleClientLogin = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!loginUser.trim() || !loginPass.trim()) {
+      setLoginError('Please enter both username and password.');
+      return;
+    }
+
+    setLoadingLogin(true);
+    setLoginError('');
+
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: loginUser, password: loginPass })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setToken(data.token);
+        setUserRole(data.role);
+        setUsername(loginUser);
+        
+        localStorage.setItem('arora_token', data.token);
+        localStorage.setItem('arora_role', data.role);
+        localStorage.setItem('arora_username', loginUser);
+
+        addNotification(`Welcome back, ${loginUser}!`, 'success');
+        setActiveTab('overview');
+      } else {
+        setLoginError(data.error || 'Invalid credentials.');
+      }
+    } catch (err: any) {
+      setLoginError('Failed to establish connection to server: ' + err.message);
+    } finally {
+      setLoadingLogin(false);
+    }
+  };
+
+  const handleClientLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { 'X-Arora-Token': token }
+      });
+    } catch {}
+
+    // Clear local storage
+    setToken('');
+    setUserRole('visitor');
+    setUsername('');
+    localStorage.removeItem('arora_token');
+    localStorage.removeItem('arora_role');
+    localStorage.removeItem('arora_username');
+    
+    setLoginUser('');
+    setLoginPass('');
+    setSqlResult(null);
+    setSqlError('');
+    addNotification('Logged out successfully.', 'success');
   };
 
   // Compaction
@@ -573,13 +656,6 @@ export default function App() {
     } finally {
       setIsRestoring(false);
     }
-  };
-
-  // Save/Apply Auth Token
-  const saveToken = () => {
-    setToken(tokenInput);
-    localStorage.setItem('arora_token', tokenInput);
-    addNotification('Token applied.', 'success');
   };
 
   // Query Builder helper additions
@@ -716,6 +792,76 @@ print(res.json())`;
   const totalKVPages = Math.ceil(kvData.length / kvPageSize) || 1;
   const paginatedKVData = kvData.slice((kvPage - 1) * kvPageSize, kvPage * kvPageSize);
 
+  // Gated Login View if not authenticated
+  if (!token) {
+    return (
+      <div className="login-container" style={{
+        display: 'flex', height: '100vh', width: '100vw', alignItems: 'center', justifyContent: 'center',
+        background: '#070913', position: 'relative', overflow: 'hidden'
+      }}>
+        <div className="glow-bg glow-purple" style={{ top: '-10%', left: '-10%', width: '60vw', height: '60vh' }}></div>
+        <div className="glow-bg glow-cyan" style={{ bottom: '-10%', right: '-10%', width: '60vw', height: '60vh' }}></div>
+
+        <div className="login-card" style={{
+          width: '420px', padding: '2.5rem', background: 'rgba(18, 22, 35, 0.65)', backdropFilter: 'blur(20px)',
+          border: '1px solid rgba(255,255,255,0.06)', borderRadius: '24px', boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
+          zIndex: 10, display: 'flex', flexDirection: 'column', gap: '1.5rem'
+        }}>
+          <div className="text-center">
+            <div className="logo-icon" style={{ margin: '0 auto 1rem auto', width: '48px', height: '48px', borderRadius: '14px' }}>
+              <Cpu size={24} style={{ color: '#070913' }} />
+            </div>
+            <h2 style={{ fontSize: '1.5rem', fontWeight: 800, margin: 0, color: '#fff' }}>AroraDB Server</h2>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>Enterprise Hybrid DB Console v4.0</p>
+          </div>
+
+          {loginError && (
+            <div className="sql-error-box code-font" style={{ color: '#ff5555', padding: '0.75rem 1rem', fontSize: '0.8rem', borderRadius: '8px', border: '1px solid rgba(255,85,85,0.1)' }}>
+              {loginError}
+            </div>
+          )}
+
+          <form onSubmit={handleClientLogin} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div className="form-group">
+              <label>Username</label>
+              <input 
+                type="text" 
+                placeholder="e.g. owner" 
+                value={loginUser}
+                onChange={(e) => setLoginUser(e.target.value)}
+                style={{ padding: '0.75rem 1rem', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-glow)', borderRadius: '8px', color: '#fff', outline: 'none' }}
+              />
+            </div>
+            
+            <div className="form-group">
+              <label>Password</label>
+              <input 
+                type="password" 
+                placeholder="••••••••" 
+                value={loginPass}
+                onChange={(e) => setLoginPass(e.target.value)}
+                style={{ padding: '0.75rem 1rem', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-glow)', borderRadius: '8px', color: '#fff', outline: 'none' }}
+              />
+            </div>
+
+            <button type="submit" className="btn btn-primary w-full mt-2" disabled={loadingLogin} style={{ padding: '0.75rem' }}>
+              {loadingLogin ? <RefreshCw size={16} className="spinner" /> : 'Authenticate Session'}
+            </button>
+          </form>
+
+          <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Demo Account Roles:</span>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <button className="btn btn-secondary btn-sm" style={{ fontSize: '0.7rem', padding: '0.3rem 0.5rem' }} onClick={() => { setLoginUser('owner'); setLoginPass('admin123'); }}>owner (Admin)</button>
+              <button className="btn btn-secondary btn-sm" style={{ fontSize: '0.7rem', padding: '0.3rem 0.5rem' }} onClick={() => { setLoginUser('dba'); setLoginPass('dba123'); }}>dba (DBA)</button>
+              <button className="btn btn-secondary btn-sm" style={{ fontSize: '0.7rem', padding: '0.3rem 0.5rem' }} onClick={() => { setLoginUser('dev'); setLoginPass('dev123'); }}>dev (User)</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="app-container">
       <div className="glow-bg glow-purple"></div>
@@ -739,7 +885,7 @@ print(res.json())`;
           </div>
           <div className="logo-text">
             <h1>AroraDB</h1>
-            <span>v3.0.0</span>
+            <span>v4.0.0</span>
           </div>
         </div>
 
@@ -823,32 +969,24 @@ print(res.json())`;
             {activeTab === 'api-docs' && 'Database Integration Guides'}
           </h2>
           
-          <div className="auth-bar" style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-            {/* RBAC Role Switcher */}
-            <div className="role-switcher-wrapper" style={{ display: 'flex', alignItems: 'center', background: 'rgba(255,255,255,0.02)', padding: '0.35rem 0.65rem', borderRadius: '8px', border: '1px solid var(--border-glow)' }}>
-              <Shield size={14} style={{ color: 'var(--color-cyan)', marginRight: '6px' }} />
-              <select 
-                value={userRole} 
-                onChange={(e) => setUserRole(e.target.value as UserRole)}
-                style={{ background: 'none', border: 'none', color: '#fff', fontSize: '0.85rem', outline: 'none', cursor: 'pointer', fontWeight: 600 }}
-              >
-                <option value="admin_proj">Project Admin</option>
-                <option value="admin_db">DB Admin (DBA)</option>
-                <option value="user_db">Database User</option>
-                <option value="visitor">Project Visitor</option>
-              </select>
+          <div className="auth-bar" style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+            {/* User details badge */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(255,255,255,0.02)', padding: '0.4rem 0.85rem', borderRadius: '10px', border: '1px solid var(--border-glow)' }}>
+              <UserCheck size={14} style={{ color: 'var(--color-cyan)' }} />
+              <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1 }}>
+                <span className="code-font" style={{ fontSize: '0.8rem', fontWeight: 700, color: '#fff' }}>{username}</span>
+                <span style={{ fontSize: '0.65rem', color: 'var(--color-purple)', fontWeight: 600, textTransform: 'uppercase', marginTop: '0.15rem' }}>
+                  {userRole === 'admin_proj' && 'Project Admin'}
+                  {userRole === 'admin_db' && 'DB Admin (DBA)'}
+                  {userRole === 'user_db' && 'DB User'}
+                  {userRole === 'visitor' && 'Visitor'}
+                </span>
+              </div>
             </div>
 
-            <div className="token-input-wrapper">
-              <Key size={14} />
-              <input 
-                type="password" 
-                placeholder="Auth Token" 
-                value={tokenInput} 
-                onChange={(e) => setTokenInput(e.target.value)} 
-              />
-            </div>
-            <button className="btn btn-primary-outline" onClick={saveToken}>Apply</button>
+            <button className="btn btn-secondary btn-sm" onClick={handleClientLogout}>
+              <LogOut size={14} /> Log Out
+            </button>
           </div>
         </header>
 
@@ -894,63 +1032,100 @@ print(res.json())`;
               </div>
             </div>
 
-            <div className="dashboard-grid" style={{ gridTemplateColumns: (userRole === 'admin_proj' ? '2fr 1fr' : '1fr') }}>
+            <div className="dashboard-grid" style={{ gridTemplateColumns: (userRole === 'admin_proj' ? '2fr 1.2fr' : '1fr'), display: 'grid', gap: '1.5rem' }}>
               {/* Telemetry charts */}
-              <div className="dashboard-panel">
-                <div className="panel-header">
-                  <h3>Telemetry Charts</h3>
-                  <div className="flex gap-2">
-                    <button 
-                      className={`btn btn-sm ${metricsTimeframe === '1m' ? 'btn-primary' : 'btn-secondary'}`}
-                      onClick={() => setMetricsTimeframe('1m')}
-                    >1m</button>
-                    <button 
-                      className={`btn btn-sm ${metricsTimeframe === '5m' ? 'btn-primary' : 'btn-secondary'}`}
-                      onClick={() => setMetricsTimeframe('5m')}
-                    >5m</button>
-                    <button 
-                      className={`btn btn-sm ${metricsTimeframe === '15m' ? 'btn-primary' : 'btn-secondary'}`}
-                      onClick={() => setMetricsTimeframe('15m')}
-                    >15m</button>
-                  </div>
-                </div>
-                <div className="panel-body">
-                  <div style={{ width: '100%', height: 180 }}>
-                    <ResponsiveContainer>
-                      <AreaChart data={chartData}>
-                        <defs>
-                          <linearGradient id="colorOps" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="var(--color-cyan)" stopOpacity={0.35}/>
-                            <stop offset="95%" stopColor="var(--color-cyan)" stopOpacity={0}/>
-                          </linearGradient>
-                          <linearGradient id="colorMem" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="var(--color-purple)" stopOpacity={0.35}/>
-                            <stop offset="95%" stopColor="var(--color-purple)" stopOpacity={0}/>
-                          </linearGradient>
-                        </defs>
-                        <XAxis dataKey="time" stroke="var(--text-muted)" fontSize={9} />
-                        <Tooltip contentStyle={{ background: '#07080c', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '10px' }} />
-                        <Area name="Ops/sec" type="monotone" dataKey="ops" stroke="var(--color-cyan)" strokeWidth={2} fillOpacity={1} fill="url(#colorOps)" />
-                        <Area name="RAM (MB)" type="monotone" dataKey="mem" stroke="var(--color-purple)" strokeWidth={2} fillOpacity={1} fill="url(#colorMem)" />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </div>
-                  <div className="chart-legend">
-                    <div className="rate-indicator">
-                      <span>{metrics?.system.read_rate ?? 0}</span>
-                      <p>Read Ops/sec</p>
-                    </div>
-                    <div className="rate-indicator">
-                      <span className="purple-text">{metrics?.system.write_rate ?? 0}</span>
-                      <p>Write Ops/sec</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                <div className="dashboard-panel" style={{ marginBottom: 0 }}>
+                  <div className="panel-header">
+                    <h3>Telemetry Charts</h3>
+                    <div className="flex gap-2">
+                      <button 
+                        className={`btn btn-sm ${metricsTimeframe === '1m' ? 'btn-primary' : 'btn-secondary'}`}
+                        onClick={() => setMetricsTimeframe('1m')}
+                      >1m</button>
+                      <button 
+                        className={`btn btn-sm ${metricsTimeframe === '5m' ? 'btn-primary' : 'btn-secondary'}`}
+                        onClick={() => setMetricsTimeframe('5m')}
+                      >5m</button>
+                      <button 
+                        className={`btn btn-sm ${metricsTimeframe === '15m' ? 'btn-primary' : 'btn-secondary'}`}
+                        onClick={() => setMetricsTimeframe('15m')}
+                      >15m</button>
                     </div>
                   </div>
+                  <div className="panel-body">
+                    <div style={{ width: '100%', height: 180 }}>
+                      <ResponsiveContainer>
+                        <AreaChart data={chartData}>
+                          <defs>
+                            <linearGradient id="colorOps" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="var(--color-cyan)" stopOpacity={0.35}/>
+                              <stop offset="95%" stopColor="var(--color-cyan)" stopOpacity={0}/>
+                            </linearGradient>
+                            <linearGradient id="colorMem" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="var(--color-purple)" stopOpacity={0.35}/>
+                              <stop offset="95%" stopColor="var(--color-purple)" stopOpacity={0}/>
+                            </linearGradient>
+                          </defs>
+                          <XAxis dataKey="time" stroke="var(--text-muted)" fontSize={9} />
+                          <Tooltip contentStyle={{ background: '#07080c', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '10px' }} />
+                          <Area name="Ops/sec" type="monotone" dataKey="ops" stroke="var(--color-cyan)" strokeWidth={2} fillOpacity={1} fill="url(#colorOps)" />
+                          <Area name="RAM (MB)" type="monotone" dataKey="mem" stroke="var(--color-purple)" strokeWidth={2} fillOpacity={1} fill="url(#colorMem)" />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div className="chart-legend">
+                      <div className="rate-indicator">
+                        <span>{metrics?.system.read_rate ?? 0}</span>
+                        <p>Read Ops/sec</p>
+                      </div>
+                      <div className="rate-indicator">
+                        <span className="purple-text">{metrics?.system.write_rate ?? 0}</span>
+                        <p>Write Ops/sec</p>
+                      </div>
+                    </div>
+                  </div>
                 </div>
+
+                {/* Audit logs terminal (Project Admin only) */}
+                {userRole === 'admin_proj' && (
+                  <div className="dashboard-panel" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', marginBottom: 0, minHeight: '300px' }}>
+                    <div className="panel-header" style={{ flexWrap: 'wrap', gap: '1rem' }}>
+                      <h3><Shield size={16} /> Live Project Activity Audit Feed</h3>
+                      <label className="flex gap-2 align-center code-font text-xs text-muted" style={{ cursor: 'pointer' }}>
+                        <input type="checkbox" checked={autoScrollAudit} onChange={(e) => setAutoScrollAudit(e.target.checked)} />
+                        Auto-Scroll
+                      </label>
+                    </div>
+                    <div className="panel-body p-0" style={{ flexGrow: 1, position: 'relative', background: '#030406', minHeight: '220px' }}>
+                      <div className="logs-terminal code-font" style={{
+                        position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                        padding: '1rem 1.5rem', overflowY: 'auto', fontSize: '0.8rem', lineHeight: 1.5,
+                        display: 'flex', flexDirection: 'column', gap: '0.35rem'
+                      }}>
+                        {auditLogs.map((entry, idx) => (
+                          <div key={idx} style={{ color: entry.action.includes('LOGIN') || entry.action.includes('LOGOUT') ? 'var(--color-purple)' : entry.action.includes('PUT') || entry.action.includes('EXECUTE') ? 'var(--color-cyan)' : '#ff5555' }}>
+                            <span style={{ color: '#4f5e71', marginRight: '0.5rem' }}>
+                              [{new Date(entry.timestamp).toLocaleTimeString()}]
+                            </span>
+                            <strong style={{ color: '#fff', marginRight: '0.5rem' }}>{entry.user}</strong>
+                            <span className="badge" style={{ background: 'rgba(255,255,255,0.04)', padding: '0.1rem 0.35rem', borderRadius: '4px', fontSize: '0.7rem', marginRight: '0.5rem' }}>{entry.action}</span>
+                            {entry.details}
+                          </div>
+                        ))}
+                        {auditLogs.length === 0 && (
+                          <div className="text-center text-muted py-5" style={{ margin: 'auto' }}>No operations logged yet.</div>
+                        )}
+                        {autoScrollAudit && <div ref={(el) => el?.scrollIntoView({ behavior: 'smooth' })} />}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Maintenance & Backups (Project Admin Only) */}
               {userRole === 'admin_proj' && (
-                <div className="dashboard-panel">
+                <div className="dashboard-panel" style={{ height: 'fit-content', marginBottom: 0 }}>
                   <div className="panel-header">
                     <h3>Operations & backups</h3>
                   </div>
@@ -1329,12 +1504,12 @@ print(res.json())`;
         {/* VIEW: SQL Workspace */}
         {activeTab === 'sql' && userRole !== 'visitor' && (
           <div className="tab-content" style={{ padding: '1.5rem', display: 'flex', flexGrow: 1 }}>
-            <div className="sql-workspace-split" style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: '1.5rem', width: '100%', height: '100%' }}>
+            <div className="sql-workspace-split" style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: '1.5rem', width: '100%', height: '100%' }}>
               
-              {/* Left Column: Schema browser */}
+              {/* Left Column: Schema browser with click-to-view rows (UX Upgrade) */}
               <div className="sql-schemas-sidebar dashboard-panel" style={{ height: '100%', display: 'flex', flexDirection: 'column', marginBottom: 0 }}>
                 <div className="panel-header">
-                  <h3><Table size={16} /> SQL Tables</h3>
+                  <h3><Table size={16} /> SQL Tables Browser</h3>
                 </div>
                 <div className="panel-body" style={{ flexGrow: 1, overflowY: 'auto' }}>
                   {sqlTables.length === 0 ? (
@@ -1342,25 +1517,30 @@ print(res.json())`;
                   ) : sqlTables.map(tbl => (
                     <div key={tbl.table_name} className="table-schema-card" style={{
                       marginBottom: '0.85rem', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-glow)',
-                      borderRadius: '8px', padding: '0.65rem 0.85rem', cursor: 'pointer'
-                    }} onClick={() => setExpandedTable(expandedTable === tbl.table_name ? null : tbl.table_name)}>
+                      borderRadius: '8px', padding: '0.65rem 0.85rem'
+                    }}>
                       <div className="flex justify-between align-center" style={{ marginBottom: '0.25rem' }}>
                         <span className="code-font font-weight-bold" style={{ color: 'var(--color-purple)', fontSize: '0.9rem' }}>{tbl.table_name}</span>
-                        <span className="badge code-font text-xs" style={{ background: 'rgba(0,245,212,0.08)', color: 'var(--color-cyan)', padding: '0.1rem 0.35rem', borderRadius: '4px' }}>
-                          Rows: {tbl.row_count}
-                        </span>
+                        
+                        {/* Inspect icon (visual table browser trigger) */}
+                        <button className="btn-action btn-view" title="Browse table content visually" onClick={() => viewSQLTableData(tbl.table_name)}>
+                          <PlayCircle size={14} />
+                        </button>
                       </div>
-                      
-                      {expandedTable === tbl.table_name && (
-                        <div className="table-cols-list" style={{ borderTop: '1px dashed rgba(255,255,255,0.05)', marginTop: '0.5rem', paddingTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                          {tbl.columns.map(col => (
-                            <div key={col.name} className="flex justify-between text-xs code-font text-muted">
-                              <span>{col.name}</span>
-                              <span style={{ color: 'var(--color-cyan)', fontSize: '0.75rem' }}>{col.type}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
+
+                      <div className="flex justify-between text-xs text-muted" style={{ marginBottom: '0.35rem' }}>
+                        <span>Columns: {tbl.columns.length}</span>
+                        <span>Rows: {tbl.row_count}</span>
+                      </div>
+
+                      <div className="table-cols-list" style={{ borderTop: '1px dashed rgba(255,255,255,0.05)', marginTop: '0.35rem', paddingTop: '0.35rem', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                        {tbl.columns.map(col => (
+                          <div key={col.name} className="flex justify-between text-xs code-font text-muted">
+                            <span>{col.name}</span>
+                            <span style={{ color: 'var(--color-cyan)', fontSize: '0.7rem' }}>{col.type}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1371,7 +1551,7 @@ print(res.json())`;
                 {/* Editor console */}
                 <div className="dashboard-panel" style={{ marginBottom: 0 }}>
                   <div className="panel-header">
-                    <h3>SQL Query Editor {userRole === 'user_db' && <span className="text-xs text-muted">(Read-Only)</span>}</h3>
+                    <h3>SQL Query Editor {userRole === 'user_db' && <span className="text-xs text-muted">(Read-Only SELECT permitted)</span>}</h3>
                   </div>
                   <div className="panel-body" style={{ padding: '1rem' }}>
                     <textarea 
@@ -1449,7 +1629,7 @@ print(res.json())`;
                     
                     {!sqlResult && !sqlError && (
                       <div className="text-center text-muted py-5" style={{ margin: 'auto' }}>
-                        Type a query above and hit "Run Query" to see output.
+                        Select a table from the sidebar or type a query above to browse content.
                       </div>
                     )}
                   </div>
@@ -1617,7 +1797,7 @@ WantedBy=multi-user.target`}
         )}
       </main>
 
-      {/* PRIVACY POLICY MODAL (NEW in v3.0) */}
+      {/* PRIVACY POLICY MODAL */}
       {showPrivacyModal && (
         <div className="modal">
           <div className="modal-content" style={{ width: '560px' }}>
