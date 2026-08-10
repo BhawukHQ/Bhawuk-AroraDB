@@ -15,6 +15,7 @@ import (
 	"github.com/BhawukHQ/Bhawuk-AroraDB/internal/engine"
 	"github.com/BhawukHQ/Bhawuk-AroraDB/internal/logs"
 	"github.com/BhawukHQ/Bhawuk-AroraDB/internal/metrics"
+	"github.com/BhawukHQ/Bhawuk-AroraDB/internal/sql"
 )
 
 //go:embed web
@@ -63,6 +64,10 @@ func (s *Server) Start() error {
 	mux.HandleFunc("GET /api/admin/backup", s.handleBackup)
 	mux.HandleFunc("POST /api/admin/restore", s.handleRestore)
 	mux.HandleFunc("GET /health", s.handleHealth)
+
+	// SQL Query Engine API
+	mux.HandleFunc("POST /api/sql", s.handleSQLQuery)
+	mux.HandleFunc("GET /api/sql/tables", s.handleSQLTables)
 
 	// Serve Static Files from embedded web UI
 	subFS, err := fs.Sub(webAssets, "web")
@@ -431,6 +436,43 @@ func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
 
 	log.Println("Database hot restore completed successfully!")
 	sendJSON(w, http.StatusOK, map[string]interface{}{"success": true, "message": "database state restored successfully"})
+}
+
+type sqlRequest struct {
+	Query string `json:"query"`
+}
+
+func (s *Server) handleSQLQuery(w http.ResponseWriter, r *http.Request) {
+	s.tracker.IncQueries()
+	
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		sendError(w, http.StatusBadRequest, "failed to read request body")
+		return
+	}
+
+	var req sqlRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		sendError(w, http.StatusBadRequest, "invalid request JSON body")
+		return
+	}
+
+	result, err := sql.ExecuteStatement(s.db, req.Query)
+	if err != nil {
+		sendError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	sendJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleSQLTables(w http.ResponseWriter, r *http.Request) {
+	tables, err := sql.ListTables(s.db)
+	if err != nil {
+		sendError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	sendJSON(w, http.StatusOK, tables)
 }
 
 // Helpers
