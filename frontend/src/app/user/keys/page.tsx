@@ -1,11 +1,26 @@
-import React from 'react';
-
-const mockKeys = [
-  { id: 'key_1', name: 'Production Backend API', prefix: 'ar_live_a8f...', scopes: ['read:sql', 'write:sql'], ips: 'Any', created: '2026-07-15' },
-  { id: 'key_2', name: 'Staging Vector Search', prefix: 'ar_test_b92...', scopes: ['read:vector'], ips: '192.168.1.0/24', created: '2026-08-01' },
-];
+"use client";
+import React, { useEffect, useState } from 'react';
+import { fetchAPI } from '@/lib/api';
 
 export default function ApiKeysPage() {
+  const [keys, setKeys] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function loadKeys() {
+      try {
+        const data = await fetchAPI('/api/v1/user/keys');
+        setKeys(Array.isArray(data) ? data : []);
+      } catch (err: any) {
+        setError(err.message || 'Failed to fetch API keys');
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadKeys();
+  }, []);
+
   return (
     <div className="min-h-screen bg-[#020617] text-slate-200 p-6 font-sans">
       <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -16,37 +31,48 @@ export default function ApiKeysPage() {
             <h1 className="text-2xl font-semibold tracking-tight text-white">API Keys</h1>
           </header>
           
-          <div className="bg-[#0F172A] border border-slate-800 rounded-lg overflow-hidden">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-[#020617]/50 text-slate-400 border-b border-slate-800">
-                <tr>
-                  <th className="px-4 py-3 font-medium">Name</th>
-                  <th className="px-4 py-3 font-medium">Key Prefix</th>
-                  <th className="px-4 py-3 font-medium">Scopes</th>
-                  <th className="px-4 py-3 font-medium text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/50">
-                {mockKeys.map((k) => (
-                  <tr key={k.id} className="hover:bg-slate-800/20 transition-colors">
-                    <td className="px-4 py-4 font-medium text-white">{k.name}</td>
-                    <td className="px-4 py-4 font-mono text-xs text-slate-400">{k.prefix}</td>
-                    <td className="px-4 py-4">
-                      <div className="flex flex-wrap gap-1">
-                        {k.scopes.map(s => (
-                          <span key={s} className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-800 border border-slate-700 text-slate-300">
-                            {s}
-                          </span>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="px-4 py-4 text-right">
-                      <button className="text-rose-400 hover:text-rose-300 text-xs font-medium">Revoke</button>
-                    </td>
+          <div className="bg-[#0F172A] border border-slate-800 rounded-lg overflow-hidden min-h-[200px]">
+            {loading ? (
+              <div className="p-8 text-center text-slate-400">Loading keys...</div>
+            ) : error ? (
+              <div className="p-8 text-center text-rose-400">{error}</div>
+            ) : (
+              <table className="w-full text-left text-sm">
+                <thead className="bg-[#020617]/50 text-slate-400 border-b border-slate-800">
+                  <tr>
+                    <th className="px-4 py-3 font-medium">Name</th>
+                    <th className="px-4 py-3 font-medium">Key Prefix</th>
+                    <th className="px-4 py-3 font-medium">Scopes</th>
+                    <th className="px-4 py-3 font-medium text-right">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-slate-800/50">
+                  {keys.map((k, i) => (
+                    <tr key={k.id || i} className="hover:bg-slate-800/20 transition-colors">
+                      <td className="px-4 py-4 font-medium text-white">{k.name}</td>
+                      <td className="px-4 py-4 font-mono text-xs text-slate-400">{k.prefix || 'ar_...'}</td>
+                      <td className="px-4 py-4">
+                        <div className="flex flex-wrap gap-1">
+                          {(k.scopes || []).map((s: string) => (
+                            <span key={s} className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-800 border border-slate-700 text-slate-300">
+                              {s}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="px-4 py-4 text-right">
+                        <button className="text-rose-400 hover:text-rose-300 text-xs font-medium">Revoke</button>
+                      </td>
+                    </tr>
+                  ))}
+                  {keys.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="px-4 py-8 text-center text-slate-500">No API keys found.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
 
