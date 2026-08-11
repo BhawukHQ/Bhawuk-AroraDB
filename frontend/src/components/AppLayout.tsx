@@ -47,16 +47,32 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
         <nav className="flex-1 p-3 space-y-2 overflow-y-auto">
           {role === "admin" && (
-            <Link href="/admin" className={`block p-2 rounded transition-colors hover:bg-slate-800 ${pathname === "/admin" ? "bg-slate-800 text-[#6366F1] font-medium" : "text-slate-300"}`}>
-              {collapsed ? "A" : "Admin Dashboard"}
-            </Link>
+            <>
+              <Link href="/admin" className={`block p-2 rounded transition-colors hover:bg-slate-800 ${pathname === "/admin" ? "bg-slate-800 text-[#6366F1] font-medium" : "text-slate-300"}`}>
+                {collapsed ? "A" : "Admin Dashboard"}
+              </Link>
+              <Link href="/admin/users" className={`block p-2 pl-6 text-sm rounded transition-colors hover:bg-slate-800 ${pathname === "/admin/users" ? "text-[#6366F1]" : "text-slate-400"}`}>
+                {collapsed ? "U" : "Tenant Management"}
+              </Link>
+              <Link href="/admin/audit" className={`block p-2 pl-6 text-sm rounded transition-colors hover:bg-slate-800 ${pathname === "/admin/audit" ? "text-[#6366F1]" : "text-slate-400"}`}>
+                {collapsed ? "L" : "Audit Logs"}
+              </Link>
+            </>
           )}
           {role === "user" && (
-            <Link href="/user" className={`block p-2 rounded transition-colors hover:bg-slate-800 ${pathname === "/user" ? "bg-slate-800 text-[#6366F1] font-medium" : "text-slate-300"}`}>
-              {collapsed ? "U" : "User Workspace"}
-            </Link>
+            <>
+              <Link href="/user" className={`block p-2 rounded transition-colors hover:bg-slate-800 ${pathname === "/user" ? "bg-slate-800 text-[#6366F1] font-medium" : "text-slate-300"}`}>
+                {collapsed ? "U" : "User Workspace"}
+              </Link>
+              <Link href="/user/console" className={`block p-2 pl-6 text-sm rounded transition-colors hover:bg-slate-800 ${pathname === "/user/console" ? "text-[#6366F1]" : "text-slate-400"}`}>
+                {collapsed ? "C" : "Multi-Model Console"}
+              </Link>
+              <Link href="/user/keys" className={`block p-2 pl-6 text-sm rounded transition-colors hover:bg-slate-800 ${pathname === "/user/keys" ? "text-[#6366F1]" : "text-slate-400"}`}>
+                {collapsed ? "K" : "API Keys"}
+              </Link>
+            </>
           )}
-          <Link href="/" className={`block p-2 rounded transition-colors hover:bg-slate-800 ${pathname === "/" ? "bg-slate-800 text-[#6366F1] font-medium" : "text-slate-300"}`}>
+          <Link href="/" className={`block p-2 rounded transition-colors hover:bg-slate-800 ${pathname === "/" ? "bg-slate-800 text-[#6366F1] font-medium" : "text-slate-300 mt-4"}`}>
               {collapsed ? "H" : "Home"}
           </Link>
         </nav>
