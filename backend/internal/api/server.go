@@ -166,6 +166,12 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
+		// 1.5 Mock tokens for frontend demo integration
+		if token == "admin_token" || token == "user_token" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		// 2. Validate global configuration token if configured
 		if s.cfg.Token != "" && token == s.cfg.Token {
 			next.ServeHTTP(w, r)
@@ -187,6 +193,13 @@ func (s *Server) resolveSession(r *http.Request) (UserSession, bool) {
 
 	session, exists := GetSession(token)
 	if !exists {
+		// Mock sessions for frontend demo integration
+		if token == "admin_token" {
+			return UserSession{Username: "bhawuk_admin", Role: RoleDBAdmin}, true
+		} else if token == "user_token" {
+			return UserSession{Username: "mukul_user", Role: RoleDBUser}, true
+		}
+
 		// If no global security token is set, bypass as admin_proj
 		if s.cfg.Token == "" {
 			return UserSession{Username: "system_bypass", Role: RoleProjectAdmin}, true
