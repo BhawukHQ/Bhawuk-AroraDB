@@ -17,6 +17,7 @@ import (
 	"github.com/BhawukHQ/Bhawuk-AroraDB/internal/logs"
 	"github.com/BhawukHQ/Bhawuk-AroraDB/internal/metrics"
 	"github.com/BhawukHQ/Bhawuk-AroraDB/internal/sql"
+	"github.com/BhawukHQ/Bhawuk-AroraDB/internal/modules"
 )
 
 //go:embed web
@@ -28,21 +29,42 @@ type Server struct {
 	cm         *document.CollectionManager
 	tracker    *metrics.Tracker
 	httpServer *http.Server
+	registry   *modules.Registry
+	mux        *http.ServeMux
+}
+
+// muxWrapper implements modules.RouteRegistrar
+type muxWrapper struct {
+	mux *http.ServeMux
+}
+
+func (mw *muxWrapper) Handle(method, path string, handler interface{}) {
+	if h, ok := handler.(func(http.ResponseWriter, *http.Request)); ok {
+		mw.mux.HandleFunc(method+" "+path, h)
+	}
 }
 
 func NewServer(cfg *config.Config, db engine.StorageEngine) *Server {
+	mux := http.NewServeMux()
 	return &Server{
-		cfg:     cfg,
-		db:      db,
-		cm:      document.NewCollectionManager(db),
-		tracker: metrics.GetTracker(),
+		cfg:      cfg,
+		db:       db,
+		cm:       document.NewCollectionManager(db),
+		tracker:  metrics.GetTracker(),
+		mux:      mux,
+		registry: modules.NewRegistry(&muxWrapper{mux: mux}),
 	}
+}
+
+// RegisterModule allows adding new features without modifying core routes
+func (s *Server) RegisterModule(m modules.Module) {
+	s.registry.Register(m)
 }
 
 // Start boots up the HTTP API server.
 func (s *Server) Start() error {
 	InitUserDatabase(s.db)
-	mux := http.NewServeMux()
+	mux := s.mux
 
 	// Register API Routes
 	// Core API

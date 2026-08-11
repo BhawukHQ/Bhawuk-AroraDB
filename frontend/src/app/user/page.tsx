@@ -1,65 +1,53 @@
-export default function UserPage() {
+import React from 'react';
+
+export default function UserDashboard() {
   return (
-    <div className="space-y-6 max-w-5xl">
-      <h2 className="text-2xl font-bold mb-4">Database Workspace</h2>
+    <div className="min-h-screen bg-[#020617] text-slate-200 p-6 font-sans">
+      <div className="max-w-7xl mx-auto space-y-6">
+        <header className="flex justify-between items-center mb-8">
+          <h1 className="text-2xl font-semibold tracking-tight text-white">Dashboard</h1>
+          <div className="text-sm text-slate-400">Current Plan: <span className="text-indigo-400 font-medium">Pro</span></div>
+        </header>
 
-      <div className="bg-surface p-5 rounded-lg border border-slate-800 shadow-sm">
-        <h3 className="font-semibold text-lg text-slate-200 mb-3">SQL Query Workbench</h3>
-        <div className="bg-background border border-slate-700 rounded-md p-4 font-mono text-sm text-slate-300 mb-4 h-32 focus-within:border-highlight transition-colors cursor-text">
-          <span className="text-highlight font-semibold">SELECT</span> * <span className="text-highlight font-semibold">FROM</span> telemetry_logs<br />
-          <span className="text-highlight font-semibold">WHERE</span> cluster_id = <span className="text-green-400">'prod-us-east'</span><br />
-          <span className="text-highlight font-semibold">ORDER BY</span> timestamp <span className="text-highlight font-semibold">DESC</span><br />
-          <span className="text-highlight font-semibold">LIMIT</span> 100;
-        </div>
-        <div className="flex justify-end gap-3">
-          <button className="text-slate-400 hover:text-slate-200 px-4 py-2 text-sm transition-colors">
-            Clear
-          </button>
-          <button className="bg-highlight hover:bg-indigo-600 text-white font-medium px-5 py-2 rounded-md text-sm transition-colors shadow-sm">
-            Execute Query
-          </button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-surface p-5 rounded-lg border border-slate-800 shadow-sm">
-          <h3 className="font-semibold text-lg text-slate-200 mb-4">Document Explorer</h3>
-          <ul className="space-y-1 text-sm text-slate-300">
-            <li className="flex items-center gap-3 p-2 rounded hover:bg-slate-800 cursor-pointer transition-colors group">
-              <span className="text-slate-500 group-hover:text-highlight">📄</span> config_schema.json
-            </li>
-            <li className="flex items-center gap-3 p-2 rounded hover:bg-slate-800 cursor-pointer transition-colors group">
-              <span className="text-slate-500 group-hover:text-highlight">📄</span> deployment_guide.md
-            </li>
-            <li className="flex items-center gap-3 p-2 rounded hover:bg-slate-800 cursor-pointer transition-colors group">
-              <span className="text-slate-500 group-hover:text-highlight">📄</span> release_notes_v2.txt
-            </li>
-            <li className="flex items-center gap-3 p-2 rounded hover:bg-slate-800 cursor-pointer transition-colors group text-slate-500">
-              <span className="text-slate-600">📁</span> archived_logs/
-            </li>
-          </ul>
-        </div>
-
-        <div className="bg-surface p-5 rounded-lg border border-slate-800 shadow-sm">
-          <h3 className="font-semibold text-lg text-slate-200 mb-4">API Key Manager</h3>
-          <div className="space-y-3">
-            <div className="flex justify-between items-center p-3 bg-slate-800/50 rounded-md border border-slate-700/50">
-              <div className="flex flex-col">
-                <span className="font-mono text-sm text-slate-300">sk_live_...4f9a</span>
-                <span className="text-xs text-slate-500 mt-0.5">Created 2 days ago</span>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Storage Utilization Gauge */}
+          <div className="bg-[#0F172A] border border-slate-800 rounded-lg p-6 lg:col-span-1 flex flex-col items-center justify-center relative">
+            <h3 className="absolute top-6 left-6 text-slate-400 text-xs font-medium uppercase tracking-wider">Storage Utilization</h3>
+            {/* Mock Gauge */}
+            <div className="mt-8 relative w-40 h-40 flex items-center justify-center">
+              <svg className="w-full h-full transform -rotate-90">
+                <circle cx="80" cy="80" r="70" stroke="currentColor" strokeWidth="12" fill="transparent" className="text-slate-800" />
+                <circle cx="80" cy="80" r="70" stroke="currentColor" strokeWidth="12" fill="transparent" strokeDasharray="440" strokeDashoffset="88" className="text-amber-500 transition-all duration-1000 ease-out" />
+              </svg>
+              <div className="absolute flex flex-col items-center justify-center">
+                <span className="text-3xl font-bold text-white">80%</span>
+                <span className="text-xs text-amber-500 font-medium">Soft Limit</span>
               </div>
-              <span className="text-xs font-medium bg-green-500/10 text-green-400 px-2 py-1 rounded-md border border-green-500/20">Active</span>
             </div>
-            <div className="flex justify-between items-center p-3 bg-slate-800/50 rounded-md border border-slate-700/50 opacity-60">
-              <div className="flex flex-col">
-                <span className="font-mono text-sm text-slate-400">sk_test_...8b21</span>
-                <span className="text-xs text-slate-500 mt-0.5">Created 1 month ago</span>
+            <div className="mt-6 w-full flex justify-between text-xs text-slate-400">
+              <span>0 GB</span>
+              <span>40 GB / 50 GB (Hard Limit)</span>
+            </div>
+          </div>
+
+          {/* Request Volume & Errors */}
+          <div className="lg:col-span-2 grid grid-rows-2 gap-6">
+            <div className="bg-[#0F172A] border border-slate-800 rounded-lg p-5 flex flex-col">
+              <h3 className="text-slate-400 text-xs font-medium uppercase tracking-wider mb-4">Request Volume (7d)</h3>
+              <div className="flex-1 border border-dashed border-slate-700 rounded flex items-center justify-center text-slate-500 text-sm">
+                [Timeline Chart Placeholder]
               </div>
-              <span className="text-xs font-medium bg-slate-500/10 text-slate-400 px-2 py-1 rounded-md border border-slate-500/20">Revoked</span>
             </div>
-            <button className="w-full mt-4 border border-dashed border-slate-600 text-slate-400 hover:text-highlight hover:border-highlight hover:bg-highlight/5 rounded-md py-2.5 text-sm font-medium transition-all">
-              + Generate New Key
-            </button>
+            
+            <div className="bg-[#0F172A] border border-slate-800 rounded-lg p-5 flex flex-col">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-slate-400 text-xs font-medium uppercase tracking-wider">Error Rate Tracking</h3>
+                <span className="text-rose-400 text-xs font-bold bg-rose-900/20 px-2 py-1 rounded">0.12% Avg</span>
+              </div>
+              <div className="flex-1 border border-dashed border-slate-700 rounded flex items-center justify-center text-slate-500 text-sm">
+                [Error Rate Chart Placeholder]
+              </div>
+            </div>
           </div>
         </div>
       </div>

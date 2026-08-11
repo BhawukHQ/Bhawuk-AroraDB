@@ -1,0 +1,64 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  lint-and-test:
+    name: Lint and Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          
+      - name: Lint and Test Go (Backend)
+        run: |
+          echo "Mocking Go Lint"
+          echo "Mocking Go Test"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Lint and Test Next.js (Frontend)
+        run: |
+          echo "Mocking Next.js Lint"
+          echo "Mocking Next.js Test"
+
+  build-and-push:
+    name: Build and Push Docker Images
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Build and Push Backend Image
+        run: |
+          echo "Mocking docker build backend"
+          echo "Mocking docker push to ECR (Backend)"
+
+      - name: Build and Push Frontend Image
+        run: |
+          echo "Mocking docker build frontend"
+          echo "Mocking docker push to ECR (Frontend)"
+
+  gitops-update:
+    name: GitOps Update
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Update ArgoCD values-prod.yaml
+        run: |
+          echo "Mocking gitops-update"
+          echo "Updating values-prod.yaml with new image tags"

@@ -1,71 +1,65 @@
-export default function AdminPage() {
+import React from 'react';
+
+export default function AdminDashboard() {
   return (
-    <div className="space-y-6 max-w-5xl">
-      <h2 className="text-2xl font-bold mb-4">Cluster Telemetry</h2>
-      
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <div className="bg-surface p-5 rounded-lg border border-slate-800 shadow-sm">
-          <h3 className="text-slate-400 text-sm font-medium mb-1">CPU Usage</h3>
-          <p className="text-3xl text-highlight font-mono font-semibold">42%</p>
-        </div>
-        <div className="bg-surface p-5 rounded-lg border border-slate-800 shadow-sm">
-          <h3 className="text-slate-400 text-sm font-medium mb-1">Memory</h3>
-          <p className="text-3xl text-highlight font-mono font-semibold">16.4 GB</p>
-        </div>
-        <div className="bg-surface p-5 rounded-lg border border-slate-800 shadow-sm">
-          <h3 className="text-slate-400 text-sm font-medium mb-1">Active Nodes</h3>
-          <p className="text-3xl text-highlight font-mono font-semibold">3 <span className="text-lg text-slate-500">/ 3</span></p>
-        </div>
-      </div>
-
-      <div className="bg-surface p-5 rounded-lg border border-slate-800 shadow-sm">
-        <div className="flex justify-between items-center mb-4">
-          <div>
-            <h3 className="font-semibold text-lg text-slate-200">Log Compaction</h3>
-            <p className="text-sm text-slate-400 mt-1">Optimize cluster storage by compacting telemetry and audit logs.</p>
-          </div>
-          <button className="bg-highlight hover:bg-indigo-600 text-white font-medium px-4 py-2 rounded-md text-sm transition-colors">
-            Run Manual Compaction
+    <div className="min-h-screen bg-[#020617] text-slate-200 p-6 font-sans">
+      <div className="max-w-7xl mx-auto space-y-6">
+        <header className="flex justify-between items-center mb-8">
+          <h1 className="text-2xl font-semibold tracking-tight text-white">AroraDB Admin Control Plane</h1>
+          <button className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors">
+            Generate Report
           </button>
-        </div>
-        <div className="bg-background rounded p-3 border border-slate-800 inline-block">
-          <span className="text-sm text-slate-400">Last compaction run: <span className="text-slate-300 font-medium">2 hours ago</span> • Space saved: <span className="text-green-400 font-medium">1.2 GB</span></span>
-        </div>
-      </div>
+        </header>
 
-      <div className="bg-surface p-5 rounded-lg border border-slate-800 shadow-sm">
-        <h3 className="font-semibold text-lg text-slate-200 mb-4">Cluster Audit Viewer</h3>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm whitespace-nowrap">
-            <thead>
-              <tr className="border-b border-slate-800 text-slate-400">
-                <th className="pb-3 font-medium">Timestamp</th>
-                <th className="pb-3 font-medium">Event</th>
-                <th className="pb-3 font-medium">User / Source</th>
-                <th className="pb-3 font-medium text-right">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr className="border-b border-slate-800/50">
-                <td className="py-3 text-slate-300 font-mono text-xs">2026-08-11 12:00:01</td>
-                <td className="py-3 font-medium text-slate-200">Node joined</td>
-                <td className="py-3 text-slate-400">System</td>
-                <td className="py-3 text-right"><span className="bg-green-500/10 text-green-400 px-2 py-1 rounded text-xs">Success</span></td>
-              </tr>
-              <tr className="border-b border-slate-800/50">
-                <td className="py-3 text-slate-300 font-mono text-xs">2026-08-11 11:45:12</td>
-                <td className="py-3 font-medium text-slate-200">API Key Revoked</td>
-                <td className="py-3 text-slate-400">admin@stitch.ui</td>
-                <td className="py-3 text-right"><span className="bg-green-500/10 text-green-400 px-2 py-1 rounded text-xs">Success</span></td>
-              </tr>
-              <tr>
-                <td className="py-3 text-slate-300 font-mono text-xs">2026-08-11 10:30:00</td>
-                <td className="py-3 font-medium text-slate-200">Config updated</td>
-                <td className="py-3 text-slate-400">admin@stitch.ui</td>
-                <td className="py-3 text-right"><span className="bg-green-500/10 text-green-400 px-2 py-1 rounded text-xs">Success</span></td>
-              </tr>
-            </tbody>
-          </table>
+        {/* Macro Metrics */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-[#0F172A] border border-slate-800 rounded-lg p-5">
+            <h3 className="text-slate-400 text-xs font-medium uppercase tracking-wider mb-2">Total Tenants</h3>
+            <div className="text-3xl font-bold text-white">1,248</div>
+            <div className="mt-2 text-emerald-400 text-xs font-medium">↑ 12% from last month</div>
+          </div>
+          <div className="bg-[#0F172A] border border-slate-800 rounded-lg p-5">
+            <h3 className="text-slate-400 text-xs font-medium uppercase tracking-wider mb-2">Storage Provisioned</h3>
+            <div className="text-3xl font-bold text-white">45.2 TB</div>
+            <div className="mt-2 text-emerald-400 text-xs font-medium">↑ 5% from last month</div>
+          </div>
+          <div className="bg-[#0F172A] border border-slate-800 rounded-lg p-5">
+            <h3 className="text-slate-400 text-xs font-medium uppercase tracking-wider mb-2">Global RPS</h3>
+            <div className="text-3xl font-bold text-white">124k</div>
+            <div className="mt-2 text-rose-400 text-xs font-medium">↓ 2% from last month</div>
+          </div>
+        </div>
+
+        {/* Telemetry Charts */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="bg-[#0F172A] border border-slate-800 rounded-lg p-5 min-h-[300px] flex flex-col">
+            <h3 className="text-white text-sm font-medium mb-4">Bitcask I/O Throughput</h3>
+            <div className="flex-1 border border-dashed border-slate-700 rounded flex items-center justify-center text-slate-500 text-sm">
+              [Telemetry Chart Placeholder]
+            </div>
+          </div>
+          <div className="bg-[#0F172A] border border-slate-800 rounded-lg p-5 min-h-[300px] flex flex-col">
+            <h3 className="text-white text-sm font-medium mb-4">Merge Process Active Threads</h3>
+            <div className="flex-1 border border-dashed border-slate-700 rounded flex items-center justify-center text-slate-500 text-sm">
+              [Telemetry Chart Placeholder]
+            </div>
+          </div>
+        </div>
+
+        {/* Trigger Panel */}
+        <div className="bg-[#0F172A] border border-slate-800 rounded-lg p-5">
+          <h3 className="text-white text-sm font-medium mb-4">System Maintenance</h3>
+          <div className="flex space-x-4">
+            <button className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded text-sm font-medium border border-slate-700 transition-colors">
+              Trigger Global Compaction
+            </button>
+            <button className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded text-sm font-medium border border-slate-700 transition-colors">
+              Initiate Cold Backup
+            </button>
+            <button className="bg-rose-900/50 hover:bg-rose-900/80 text-rose-300 px-4 py-2 rounded text-sm font-medium border border-rose-800 transition-colors ml-auto">
+              Emergency Flush
+            </button>
+          </div>
         </div>
       </div>
     </div>
