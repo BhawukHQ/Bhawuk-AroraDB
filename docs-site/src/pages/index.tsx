@@ -21,7 +21,12 @@ function HomepageHeader() {
           <Link
             className="button button--secondary button--lg"
             to="/docs/intro">
-            Docusaurus Tutorial - 5min ⏱️
+            Read the Docs 🚀
+          </Link>
+          <Link
+            className="button button--outline button--secondary button--lg margin-left--md"
+            to="/docs/architecture/infrastructure">
+            View Architecture
           </Link>
         </div>
       </div>

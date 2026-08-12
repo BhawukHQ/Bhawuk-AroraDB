@@ -22,8 +22,8 @@ const config: Config = {
 
   // GitHub pages deployment config.
   // If you aren't using GitHub pages, you don't need these.
-  organizationName: 'facebook', // Usually your GitHub org/user name.
-  projectName: 'docusaurus', // Usually your repo name.
+  organizationName: 'BhawukHQ', // Usually your GitHub org/user name.
+  projectName: 'Bhawuk-AroraDB', // Usually your repo name.
 
   onBrokenLinks: 'throw',
 
@@ -49,7 +49,7 @@ const config: Config = {
           // Please change this to your repo.
           // Remove this to remove the "edit this page" links.
           editUrl:
-            'https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/',
+            'https://github.com/BhawukHQ/Bhawuk-AroraDB/tree/main/docs-site/',
         },
         blog: false,
         theme: {
@@ -66,9 +66,9 @@ const config: Config = {
       respectPrefersColorScheme: true,
     },
     navbar: {
-      title: 'My Site',
+      title: 'AroraDB',
       logo: {
-        alt: 'My Site Logo',
+        alt: 'AroraDB Logo',
         src: 'img/logo.svg',
       },
       items: [
@@ -76,11 +76,11 @@ const config: Config = {
           type: 'docSidebar',
           sidebarId: 'tutorialSidebar',
           position: 'left',
-          label: 'Tutorial',
+          label: 'Documentation',
         },
 
         {
-          href: 'https://github.com/facebook/docusaurus',
+          href: 'https://github.com/BhawukHQ/Bhawuk-AroraDB',
           label: 'GitHub',
           position: 'right',
         },
@@ -93,7 +93,7 @@ const config: Config = {
           title: 'Docs',
           items: [
             {
-              label: 'Tutorial',
+              label: 'Documentation',
               to: '/docs/intro',
             },
           ],
@@ -103,15 +103,15 @@ const config: Config = {
           items: [
             {
               label: 'Stack Overflow',
-              href: 'https://stackoverflow.com/questions/tagged/docusaurus',
+              href: 'https://stackoverflow.com/questions/tagged/aroradb',
             },
             {
               label: 'Discord',
-              href: 'https://discordapp.com/invite/docusaurus',
+              href: 'https://discordapp.com/invite/aroradb',
             },
             {
               label: 'X',
-              href: 'https://x.com/docusaurus',
+              href: 'https://x.com/aroradb',
             },
           ],
         },
@@ -121,12 +121,12 @@ const config: Config = {
 
             {
               label: 'GitHub',
-              href: 'https://github.com/facebook/docusaurus',
+              href: 'https://github.com/BhawukHQ/Bhawuk-AroraDB',
             },
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} My Project, Inc. Built with Docusaurus.`,
+      copyright: `Copyright © ${new Date().getFullYear()} Bhawuk Arora. Built with Docusaurus.`,
     },
     prism: {
       theme: prismThemes.github,

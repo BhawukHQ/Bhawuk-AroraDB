@@ -84,6 +84,13 @@ Even though the NAT Gateway is present, we provisioned **VPC Endpoints (PrivateL
 **Why?**
 When the Kubernetes worker nodes pull heavy database container images, routing that massive data transfer through the NAT Gateway would incur standard NAT data processing fees (`~$0.045 per GB`). By adding VPC Endpoints for ECR and S3, the image pull traffic stays completely on the internal AWS network backbone, saving significant costs during scaling events while maintaining strict privacy.
 
+#### 5. Deployment Access via Bastion Host
+Because the EKS Control Plane is fully private, you cannot run `kubectl` or `helm` commands from your local laptop over the public internet. 
+To deploy applications or manage the cluster, we use a **Bastion Host** (Jump Box):
+- A small EC2 instance (e.g., `t3.micro`) is deployed in the Public Subnet.
+- Engineers connect to it via **AWS EC2 Instance Connect** (no open SSH ports required).
+- From inside the Bastion Host terminal, engineers can securely communicate with the private EKS API endpoint.
+
 ---
 
 ## The Core Environment (`dev`)

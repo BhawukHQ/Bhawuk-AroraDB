@@ -1,4 +1,3 @@
-import type {ReactNode} from 'react';
 import clsx from 'clsx';
 import Heading from '@theme/Heading';
 import styles from './styles.module.css';
@@ -6,37 +5,37 @@ import styles from './styles.module.css';
 type FeatureItem = {
   title: string;
   Svg: React.ComponentType<React.ComponentProps<'svg'>>;
-  description: ReactNode;
+  description: JSX.Element;
 };
 
 const FeatureList: FeatureItem[] = [
   {
-    title: 'Easy to Use',
+    title: 'Fully Private Architecture',
     Svg: require('@site/static/img/undraw_docusaurus_mountain.svg').default,
     description: (
       <>
-        Docusaurus was designed from the ground up to be easily installed and
-        used to get your website up and running quickly.
+        AroraDB operates within a zero-trust VPC environment. The EKS control plane is entirely private, 
+        and application traffic is routed exclusively through internal load balancers to ensure maximum security.
       </>
     ),
   },
   {
-    title: 'Focus on What Matters',
+    title: 'Stateless OIDC Auth',
     Svg: require('@site/static/img/undraw_docusaurus_tree.svg').default,
     description: (
       <>
-        Docusaurus lets you focus on your docs, and we&apos;ll do the chores. Go
-        ahead and move your docs into the <code>docs</code> directory.
+        Authentication is completely offloaded to the AWS Application Load Balancer and AWS Cognito. 
+        The Go backend remains entirely stateless, relying on cryptographically verified JWT signatures.
       </>
     ),
   },
   {
-    title: 'Powered by React',
+    title: 'High Performance Storage',
     Svg: require('@site/static/img/undraw_docusaurus_react.svg').default,
     description: (
       <>
-        Extend or customize your website layout by reusing React. Docusaurus can
-        be extended while reusing the same header and footer.
+        Leveraging the EBS CSI driver, AroraDB StatefulSets are backed by gp3 NVMe volumes, 
+        providing guaranteed IOPS and throughput for demanding database workloads.
       </>
     ),
   },
@@ -56,7 +55,7 @@ function Feature({title, Svg, description}: FeatureItem) {
   );
 }
 
-export default function HomepageFeatures(): ReactNode {
+export default function HomepageFeatures(): JSX.Element {
   return (
     <section className={styles.features}>
       <div className="container">
