@@ -11,12 +11,14 @@ The infrastructure is designed with a **Zero-Trust, Fully Private Architecture**
 ```mermaid
 flowchart TD
     Client([VPN Client / Direct Connect]) -->|HTTPS| ALB[Internal ALB\napp.aroradb.bhawukarora.app]
+    Engineer([Engineers / Developers]) -.->|EC2 Instance Connect| Bastion
     
     subgraph AWS_Cloud [AWS Region: us-east-1]
         Cognito([AWS Cognito])
         ACM([AWS Certificate Manager])
         ECR([Amazon ECR])
         S3([Amazon S3])
+        Secrets([AWS Secrets Manager])
         
         subgraph VPC [VPC: bhawuk-dev-vpc\n10.1.0.0/16]
             NAT[NAT Gateway]
@@ -24,6 +26,7 @@ flowchart TD
             
             subgraph Public [Public Subnets\n10.1.101.0/24 - 10.1.103.0/24]
                 NAT
+                Bastion[EC2 Bastion Host]
             end
             
             subgraph Private [Private Subnets\n10.1.1.0/24 - 10.1.3.0/24]
@@ -33,6 +36,7 @@ flowchart TD
                 subgraph EKS_Nodes [EKS Worker Nodes\nus-east-1a, 1b, 1c]
                     UI[Next.js Frontend Pods]
                     API[Go Backend API StatefulSet]
+                    ESO[External Secrets Operator]
                 end
                 
                 EBS[(Amazon EBS\ngp3 Volumes)]
@@ -52,6 +56,10 @@ flowchart TD
     EKS_Nodes -.->|Pulls Images| Endpoints
     Endpoints -.-> ECR
     Endpoints -.-> S3
+    
+    Bastion -->|Manages Cluster| EKS_CP
+    
+    ESO -.->|Pulls DB Passwords (IRSA)| Secrets
 ```
 
 ### Key Architectural Decisions
