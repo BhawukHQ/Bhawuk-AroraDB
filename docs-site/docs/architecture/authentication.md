@@ -4,7 +4,7 @@ Bhawuk-AroraDB uses a modern, zero-trust authentication architecture deployed on
 
 ## How It Works (The Flow)
 
-1. **Edge Interception**: When a user navigates to the application (e.g., `https://app.aroradb.io`), the request hits the AWS Application Load Balancer.
+1. **Edge Interception**: When a user navigates to the application (e.g., `https://app.aroradb.bhawukarora.app`), the request hits the AWS Application Load Balancer.
 2. **ALB Auth Action**: The ALB is configured with an `authenticate-cognito` rule. If the request lacks a valid session cookie, the ALB redirects the user to the AWS Cognito Hosted UI.
 3. **Cognito Login**: The user authenticates against the Cognito User Pool (`us-east-1_XqA9bWB6S`).
 4. **Session Creation**: Upon successful login, Cognito redirects back to the ALB with an authorization code. The ALB exchanges this code for JWTs, sets a secure HTTP-only cookie (`AWSELBAuthSessionCookie`), and forwards the request to the EKS pods.
@@ -36,3 +36,4 @@ Because the ALB handles the heavy lifting, **the backend pods are entirely state
 
 ## Local Development
 For local development where an ALB is not present, the `CognitoALBMiddleware` currently falls through allowing mock authentication, but can be configured to require strict headers or mock them for testing purposes.
+
