@@ -10,41 +10,48 @@ The infrastructure is designed with a **Zero-Trust, Fully Private Architecture**
 
 ```mermaid
 flowchart TD
-    User([End User / VPN Client]) -->|Client VPN / Direct Connect| InternalALB
+    Client([VPN Client / Direct Connect]) -->|HTTPS| ALB[Internal ALB\napp.aroradb.bhawukarora.app]
     
-    subgraph AWS Cloud
-        subgraph VPC [Private VPC]
+    subgraph AWS_Cloud [AWS Region: us-east-1]
+        Cognito([AWS Cognito])
+        ACM([AWS Certificate Manager])
+        ECR([Amazon ECR])
+        S3([Amazon S3])
+        
+        subgraph VPC [VPC: bhawuk-dev-vpc\n10.1.0.0/16]
             NAT[NAT Gateway]
+            Endpoints[VPC Endpoints:\necr.api, ecr.dkr, s3]
             
-            subgraph PublicSubnet [Public Subnet]
+            subgraph Public [Public Subnets\n10.1.101.0/24 - 10.1.103.0/24]
                 NAT
             end
             
-            subgraph PrivateSubnet [Private Subnet]
-                InternalALB[Internal Application Load Balancer]
-                EKS_CP[(EKS Control Plane)]
+            subgraph Private [Private Subnets\n10.1.1.0/24 - 10.1.3.0/24]
+                ALB
+                EKS_CP[(EKS: bhawuk-dev-eks\nPrivate API Endpoint)]
                 
-                subgraph EKS_Nodes [EKS Worker Nodes]
-                    Pod_UI[Next.js Frontend]
-                    Pod_API[Go Backend API]
+                subgraph EKS_Nodes [EKS Worker Nodes\nus-east-1a, 1b, 1c]
+                    UI[Next.js Frontend Pods]
+                    API[Go Backend API StatefulSet]
                 end
+                
+                EBS[(Amazon EBS\ngp3 Volumes)]
             end
         end
-        
-        Cognito([AWS Cognito])
-        ALB_Keys([AWS Public Keys S3])
-        ECR([Amazon ECR])
     end
 
-    InternalALB -->|Routes Traffic| Pod_UI
-    InternalALB -->|Routes Traffic| Pod_API
-    InternalALB -->|OIDC Auth| Cognito
+    ALB -->|Routes UI Traffic| UI
+    ALB -->|Routes API Traffic| API
+    ALB <-->|OIDC Auth Flow| Cognito
+    ALB -.->|Fetches SSL| ACM
     
-    Pod_API -.->|Fetches JWT Signature Keys| NAT
-    EKS_Nodes -.->|Pulls Images| NAT
+    API --- EBS
     
-    NAT -.-> ALB_Keys
-    NAT -.-> ECR
+    API -.->|Fetches Public Keys| NAT
+    
+    EKS_Nodes -.->|Pulls Images| Endpoints
+    Endpoints -.-> ECR
+    Endpoints -.-> S3
 ```
 
 ### Key Architectural Decisions
@@ -70,6 +77,12 @@ While the entire inbound architecture is completely private (no public IPs on no
 The Go backend API utilizes stateless OIDC authentication via the ALB. To securely verify the JWT signatures injected by the ALB, the Go backend must dynamically download the ALB's public signing keys from AWS. AWS hosts these keys on a public internet endpoint (`https://public-keys.auth.elb.us-east-1.amazonaws.com`). 
 
 Because AWS does not provide a VPC Endpoint (PrivateLink) for this specific public key bucket, disabling the NAT Gateway would completely air-gap the pods, preventing the backend from verifying JWTs and breaking all authentication. The NAT Gateway provides this necessary outbound-only route while keeping inbound access strictly sealed.
+
+#### 4. ECR PrivateLink (Cost Optimization)
+Even though the NAT Gateway is present, we provisioned **VPC Endpoints (PrivateLink)** for Amazon ECR (`ecr.api`, `ecr.dkr`) and Amazon S3 (Gateway).
+
+**Why?**
+When the Kubernetes worker nodes pull heavy database container images, routing that massive data transfer through the NAT Gateway would incur standard NAT data processing fees (`~$0.045 per GB`). By adding VPC Endpoints for ECR and S3, the image pull traffic stays completely on the internal AWS network backbone, saving significant costs during scaling events while maintaining strict privacy.
 
 ---
 
