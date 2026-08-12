@@ -91,6 +91,12 @@ To deploy applications or manage the cluster, we use a **Bastion Host** (Jump Bo
 - Engineers connect to it via **AWS EC2 Instance Connect** (no open SSH ports required).
 - From inside the Bastion Host terminal, engineers can securely communicate with the private EKS API endpoint.
 
+#### 6. AWS Secrets Manager Integration
+We never store sensitive information (like DB passwords or OAuth secrets) in Git or plain text Helm values. Instead:
+- Secrets are securely created and stored directly in **AWS Secrets Manager**.
+- We run the **External Secrets Operator (ESO)** inside the EKS cluster.
+- Using a dedicated IAM Role for Service Accounts (IRSA), ESO authenticates with AWS, securely fetches the specified secrets in memory, and injects them directly into the Go backend pods at runtime.
+
 ---
 
 ## The Core Environment (`dev`)
