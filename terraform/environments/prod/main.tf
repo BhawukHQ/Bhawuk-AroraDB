@@ -12,14 +12,14 @@ provider "aws" {
 }
 
 module "vpc" {
-  source = "../modules/vpc"
+  source = "../../modules/vpc"
 
   vpc_name = var.vpc_name
   vpc_cidr = var.vpc_cidr
 }
 
 module "eks" {
-  source = "../modules/eks"
+  source = "../../modules/eks"
 
   cluster_name    = var.cluster_name
   cluster_version = var.cluster_version
@@ -28,11 +28,11 @@ module "eks" {
 }
 
 module "ebs_csi" {
-  source = "../modules/ebs_csi"
+  source = "../../modules/ebs_csi"
 
   cluster_name = module.eks.cluster_name
 }
 
 module "ecr" {
-  source = "../modules/ecr"
+  source = "../../modules/ecr"
 }

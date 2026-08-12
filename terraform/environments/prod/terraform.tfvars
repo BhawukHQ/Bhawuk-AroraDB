@@ -1,0 +1,5 @@
+aws_region      = "us-east-1"
+vpc_name        = "bhawuk-prod-vpc"
+vpc_cidr        = "10.0.0.0/16"
+cluster_name    = "bhawuk-prod-eks"
+cluster_version = "1.30"
