@@ -1,0 +1,24 @@
+{
+  "id": "architecture/core",
+  "title": "AroraDB Architecture Knowledge Base",
+  "description": "Overview",
+  "source": "@site/docs/architecture/core.md",
+  "sourceDirName": "architecture",
+  "slug": "/architecture/core",
+  "permalink": "/docs/architecture/core",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/architecture/core.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {},
+  "sidebar": "tutorialSidebar",
+  "previous": {
+    "title": "Authentication Architecture",
+    "permalink": "/docs/architecture/authentication"
+  },
+  "next": {
+    "title": "Infrastructure Setup",
+    "permalink": "/docs/architecture/infrastructure"
+  }
+}

@@ -1,0 +1,119 @@
+openapi: 3.0.0
+info:
+  title: AroraDB API
+  description: Enterprise multi-model database REST API for AroraDB
+  version: "1.0.0"
+servers:
+  - url: http://localhost:9000/api/v1
+    description: Local development server
+paths:
+  /admin/users:
+    get:
+      summary: Get all tenants
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: A list of users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
+  /admin/audit:
+    get:
+      summary: Get system audit logs
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: System logs
+  /user/stats:
+    get:
+      summary: Get current tenant quota usage
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Quota and usage stats
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotaStats'
+  /user/keys:
+    get:
+      summary: List active API keys
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: API keys
+    post:
+      summary: Create a new API key
+      security:
+        - BearerAuth: []
+      responses:
+        '201':
+          description: Key created
+  /sql:
+    post:
+      summary: Execute a SQL query
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                query:
+                  type: string
+                  example: "SELECT * FROM users"
+      responses:
+        '200':
+          description: Query results
+  /documents/{collection}:
+    post:
+      summary: Insert a JSON document
+      parameters:
+        - name: collection
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '201':
+          description: Document inserted
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+    QuotaStats:
+      type: object
+      properties:
+        storage_used_bytes:
+          type: integer
+        storage_limit_bytes:
+          type: integer
+        current_rps:
+          type: integer

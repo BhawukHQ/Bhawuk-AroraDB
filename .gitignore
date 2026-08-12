@@ -22,3 +22,12 @@ Thumbs.db
 *.tfstate.backup
 *.tfplan
 .terraform.lock.hcl
+
+# Node / Frontend / Docs
+node_modules/
+.next/
+build/
+dist/
+.docusaurus/
+.env
+.env.local
