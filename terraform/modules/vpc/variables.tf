@@ -1,4 +1,4 @@
-variable "cluster_name" {
+variable "vpc_name" {
   description = "Name used for the VPC"
   type        = string
 }
