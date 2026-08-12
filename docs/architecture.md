@@ -29,7 +29,7 @@ The frontend is a modern Next.js App Router application written in TypeScript, f
 The deployment architecture uses GitOps principles for AWS Kubernetes.
 - **Terraform (`/terraform`)**: Provisions the AWS VPC, EKS Cluster (m6i instances), IAM IRSA roles, and EBS CSI drivers for persistent storage.
 - **Helm & ArgoCD (`/helm`)**: Deploys the Go backend as a 3-Node StatefulSet (Leader-Replica architecture) mapping `/data/db` to gp3 NVMe volumes. The Next.js frontend is deployed as a Stateless Deployment.
-- **Gateway API**: Routes `api.aroradb.io` and `app.aroradb.io` traffic securely into the cluster.
+- **AWS ALB Ingress**: Routes `api.aroradb.io` and `app.aroradb.io` traffic securely into the cluster while offloading authentication entirely to **AWS Cognito**. See [Authentication Architecture](authentication.md) for details on the stateless OIDC flow.
 
 ---
 

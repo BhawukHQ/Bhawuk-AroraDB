@@ -8,7 +8,7 @@ type Role = "admin" | "user" | null;
 interface AuthContextType {
   username: string | null;
   role: Role;
-  login: (username: string) => void;
+  login: () => void;
   logout: () => void;
 }
 
@@ -19,46 +19,38 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [role, setRole] = useState<Role>(null);
   const router = useRouter();
 
-  // Load from localStorage on mount
+  // Helper to read cookie by name
+  const getCookie = (name: string) => {
+    if (typeof document === "undefined") return null;
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return parts.pop()?.split(";").shift() || null;
+    return null;
+  };
+
+  // Load from cookies on mount
   useEffect(() => {
-    const storedUser = localStorage.getItem("aroradb_user");
-    const storedRole = localStorage.getItem("aroradb_role");
+    const storedUser = getCookie("aroradb_user");
+    const storedRole = getCookie("aroradb_role");
+    
     if (storedUser && storedRole) {
       setUsername(storedUser);
       setRole(storedRole as Role);
     }
   }, []);
 
-  const login = (user: string) => {
-    let assignedRole: Role = null;
-    if (user.toLowerCase() === "bhawuk") {
-      assignedRole = "admin";
-    } else if (user.toLowerCase() === "mukul") {
-      assignedRole = "user";
-    } else {
-      // default generic fallback for demo if someone else tries
-      assignedRole = "user";
-    }
-
-    setUsername(user);
-    setRole(assignedRole);
-    localStorage.setItem("aroradb_user", user);
-    localStorage.setItem("aroradb_role", assignedRole);
-
-    // Redirect to respective portal
-    if (assignedRole === "admin") {
-      router.push("/admin");
-    } else {
-      router.push("/user");
-    }
+  const login = () => {
+    // Redirect to backend Cognito login endpoint
+    // Assuming backend is on localhost:8080 or same domain in prod
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8080";
+    window.location.href = `${backendUrl}/api/auth/cognito/login`;
   };
 
   const logout = () => {
     setUsername(null);
     setRole(null);
-    localStorage.removeItem("aroradb_user");
-    localStorage.removeItem("aroradb_role");
-    router.push("/login");
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8080";
+    window.location.href = `${backendUrl}/api/auth/cognito/logout`;
   };
 
   return (

@@ -64,6 +64,7 @@ func (s *Server) RegisterModule(m modules.Module) {
 // Start boots up the HTTP API server.
 func (s *Server) Start() error {
 	InitUserDatabase(s.db)
+
 	mux := s.mux
 
 	// Register API Routes
@@ -97,6 +98,9 @@ func (s *Server) Start() error {
 	// User Auth API
 	mux.HandleFunc("POST /api/auth/login", handleLogin)
 	mux.HandleFunc("POST /api/auth/logout", handleLogout)
+	mux.HandleFunc("GET /api/auth/cognito/login", s.handleCognitoLogin)
+	mux.HandleFunc("GET /api/auth/cognito/callback", s.handleCognitoCallback)
+	mux.HandleFunc("GET /api/auth/cognito/logout", s.handleCognitoLogout)
 	mux.HandleFunc("GET /api/admin/audit", handleGetAuditLogs)
 	
 	// User Onboarding Management API
@@ -115,6 +119,7 @@ func (s *Server) Start() error {
 	// Wrap handlers with middleware
 	var handler http.Handler = mux
 	handler = s.authMiddleware(handler)
+	handler = s.CognitoALBMiddleware(handler)
 	handler = s.corsMiddleware(handler)
 	handler = s.loggingMiddleware(handler)
 

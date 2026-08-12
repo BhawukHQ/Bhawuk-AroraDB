@@ -1,18 +1,10 @@
 "use client";
 
-import React, { useState } from "react";
+import React from "react";
 import { useAuth } from "@/context/AuthContext";
 
 export default function LoginPage() {
-  const [username, setUsername] = useState("");
   const { login } = useAuth();
-
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (username.trim()) {
-      login(username.trim());
-    }
-  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#020617] text-white">
@@ -22,45 +14,14 @@ export default function LoginPage() {
           <p className="text-slate-400">Sign in to your workspace</p>
         </div>
 
-        <form onSubmit={handleLogin} className="space-y-6">
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">
-              Username
-            </label>
-            <input
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#6366F1] text-white"
-              placeholder="e.g., bhawuk or mukul"
-              required
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">
-              Password
-            </label>
-            <input
-              type="password"
-              className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#6366F1] text-white"
-              placeholder="••••••••"
-              disabled
-            />
-            <p className="text-xs text-slate-500 mt-2">Password is mocked for this demo.</p>
-          </div>
-
+        <div className="flex justify-center mt-8">
           <button
-            type="submit"
-            className="w-full bg-[#6366F1] hover:bg-indigo-500 text-white font-medium py-3 rounded-lg transition-colors"
+            onClick={() => login()}
+            className="w-full bg-[#6366F1] hover:bg-indigo-500 text-white font-medium py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
           >
-            Sign In
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+            Sign in with AWS Cognito
           </button>
-        </form>
-
-        <div className="mt-8 text-center text-sm text-slate-400">
-          <p>Demo Roles:</p>
-          <p>Admin: <span className="text-indigo-400 font-semibold">bhawuk</span></p>
-          <p>User: <span className="text-indigo-400 font-semibold">mukul</span></p>
         </div>
       </div>
     </div>
