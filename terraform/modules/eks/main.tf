@@ -9,6 +9,9 @@ module "eks" {
   subnet_ids               = var.subnet_ids
   control_plane_subnet_ids = var.control_plane_subnet_ids
 
+  cluster_endpoint_public_access  = false
+  cluster_endpoint_private_access = true
+
   eks_managed_node_groups = {
     default = {
       instance_types = ["m6i.large", "c6i.large"]

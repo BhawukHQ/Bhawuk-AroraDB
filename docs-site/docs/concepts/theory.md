@@ -49,7 +49,9 @@ For full-text search across JSON fields, AroraDB uses an Inverted Index.
 To search AI embeddings (e.g., 1536-dimensional OpenAI vectors), exhaustive `O(N)` scans are too slow. AroraDB implements Hierarchical Navigable Small World (HNSW) graphs.
 
 **Cosine Similarity Formula**:
+```latex
 \[ \text{similarity} = \frac{A \cdot B}{||A|| ||B||} = \frac{\sum_{i=1}^n A_i B_i}{\sqrt{\sum_{i=1}^n A_i^2} \sqrt{\sum_{i=1}^n B_i^2}} \]
+```
 
 **Graph Traversal**: HNSW builds a multi-layered skip-list graph. The search drops from the sparse top layer down to the dense bottom layer, greedily jumping to closer nodes.
 - **Search Complexity**: `O(log N)` for highly dimensional data, dramatically outperforming flat FlatL2 or IVF variants.

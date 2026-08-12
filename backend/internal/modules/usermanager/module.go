@@ -42,8 +42,8 @@ func (m *UserManagerModule) OnShutdown(ctx context.Context) error {
 func (m *UserManagerModule) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 	// Mock returning a list of users
 	users := []User{
-		{ID: "usr_1", Email: "bhawuk@aroradb.io", Role: ROLE_ADMIN, Status: "active"},
-		{ID: "usr_2", Email: "mukul@aroradb.io", Role: ROLE_USER, Status: "active"},
+		{ID: "usr_1", Email: "bhawuk@aroradb.bhawukarora.app", Role: ROLE_ADMIN, Status: "active"},
+		{ID: "usr_2", Email: "mukul@aroradb.bhawukarora.app", Role: ROLE_USER, Status: "active"},
 	}
 	json.NewEncoder(w).Encode(users)
 }
@@ -96,3 +96,4 @@ func (m *UserManagerModule) handleRevokeKey(w http.ResponseWriter, r *http.Reque
 func (m *UserManagerModule) handleWhitelistIP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
+

@@ -80,11 +80,11 @@ export default function HomePage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="p-4 bg-slate-900 rounded border border-slate-800">
                 <h3 className="text-sm font-medium text-slate-400 mb-1">REST API Endpoint</h3>
-                <code className="text-[#6366F1]">https://api.aroradb.io/v1</code>
+                <code className="text-[#6366F1]">https://api.aroradb.bhawukarora.app/v1</code>
               </div>
               <div className="p-4 bg-slate-900 rounded border border-slate-800">
                 <h3 className="text-sm font-medium text-slate-400 mb-1">PostgreSQL Wire (SQL Engine)</h3>
-                <code className="text-[#6366F1]">postgres://user:pass@api.aroradb.io:5432/db</code>
+                <code className="text-[#6366F1]">postgres://user:pass@api.aroradb.bhawukarora.app:5432/db</code>
               </div>
             </div>
             
@@ -175,3 +175,4 @@ export default function HomePage() {
     </div>
   );
 }
+

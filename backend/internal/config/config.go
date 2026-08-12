@@ -9,8 +9,12 @@ import (
 type Config struct {
 	Port        int
 	DBDir       string
-	Token       string
-	MaxFileSize int64
+	Token               string
+	MaxFileSize         int64
+	CognitoClientID     string
+	CognitoClientSecret string
+	CognitoRedirectURL  string
+	CognitoIssuerURL    string
 }
 
 // Load loads settings from CLI arguments and environment variables.
@@ -43,6 +47,10 @@ func Load() *Config {
 	flag.StringVar(&cfg.DBDir, "dir", defaultDBDir, "Directory to store database data files")
 	flag.StringVar(&cfg.Token, "token", defaultToken, "Security token for requests (empty to disable auth)")
 	flag.Int64Var(&cfg.MaxFileSize, "max-size", defaultMaxFileSize, "Max size in bytes for a single data file before rotation")
+	flag.StringVar(&cfg.CognitoClientID, "cognito-client-id", os.Getenv("ARORADB_COGNITO_CLIENT_ID"), "AWS Cognito Client ID")
+	flag.StringVar(&cfg.CognitoClientSecret, "cognito-client-secret", os.Getenv("ARORADB_COGNITO_CLIENT_SECRET"), "AWS Cognito Client Secret")
+	flag.StringVar(&cfg.CognitoRedirectURL, "cognito-redirect-url", os.Getenv("ARORADB_COGNITO_REDIRECT_URL"), "AWS Cognito Redirect URL")
+	flag.StringVar(&cfg.CognitoIssuerURL, "cognito-issuer-url", os.Getenv("ARORADB_COGNITO_ISSUER_URL"), "AWS Cognito Issuer URL")
 	flag.Parse()
 
 	return cfg

@@ -3,13 +3,16 @@ module github.com/BhawukHQ/Bhawuk-AroraDB
 go 1.26.3
 
 require (
+	github.com/coreos/go-oidc/v3 v3.20.0
 	github.com/hashicorp/raft v1.7.3
 	github.com/spf13/cobra v1.10.2
+	golang.org/x/oauth2 v0.36.0
 )
 
 require (
 	github.com/armon/go-metrics v0.4.1 // indirect
 	github.com/fatih/color v1.13.0 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/hashicorp/go-hclog v1.6.2 // indirect
 	github.com/hashicorp/go-immutable-radix v1.0.0 // indirect
 	github.com/hashicorp/go-metrics v0.5.4 // indirect
